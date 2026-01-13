@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+
+# Mac system files
+.DS_Store
+*.swp
+
+# Environment and secrets
+.env
+.env.local
+.env*.local
+*.p12
+*.pem
+*.key
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
+
+# Logs
+*.log
+npm-debug.log*
+
+# Electron builder cache
+.cache/
+
+# Icon generation temp files
+assets/icon.iconset/
