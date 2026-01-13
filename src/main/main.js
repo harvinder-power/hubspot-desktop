@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, ipcMain } = require('electron');
+const { app, BrowserWindow, session, ipcMain, globalShortcut } = require('electron');
 const path = require('path');
 
 // Modules
@@ -6,15 +6,18 @@ const { createMenu } = require('./menu');
 const NotificationManager = require('./notifications');
 const DockManager = require('./dock');
 const WindowManager = require('./window-state');
+const TrayManager = require('./tray');
 
 // Constants
 const PARTITION = 'persist:hubspot';
 const HUBSPOT_URL = 'https://app.hubspot.com';
+const GLOBAL_SHORTCUT = 'CommandOrControl+Shift+H';
 
 // Managers
 let windowManager;
 let notificationManager;
 let dockManager;
+let trayManager;
 
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
@@ -41,12 +44,22 @@ app.whenReady().then(async () => {
   // Initialize managers
   notificationManager = new NotificationManager(mainWindow);
   dockManager = new DockManager(mainWindow);
+  trayManager = new TrayManager(mainWindow, windowManager);
 
   // Create menu
   createMenu(mainWindow);
 
   // Setup security handlers
   setupSecurity(mainWindow);
+
+  // Register global shortcut (Cmd+Shift+H to show/hide)
+  globalShortcut.register(GLOBAL_SHORTCUT, () => {
+    if (mainWindow.isVisible() && mainWindow.isFocused()) {
+      mainWindow.hide();
+    } else {
+      windowManager.focusOrCreate();
+    }
+  });
 
   // Load HubSpot
   mainWindow.loadURL(HUBSPOT_URL);
@@ -55,6 +68,11 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     windowManager.focusOrCreate();
   });
+});
+
+// Cleanup on quit
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });
 
 // Quit when all windows are closed (Windows/Linux)

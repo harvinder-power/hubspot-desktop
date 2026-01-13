@@ -4,6 +4,8 @@ A native Mac desktop app for HubSpot. No more browser tabs — access HubSpot di
 
 ## Features
 
+- **Menu Bar Quick Actions** — Access HubSpot from your menu bar without opening the full app
+- **Global Hotkey** — Press `Cmd+Shift+H` from anywhere to show/hide the app
 - **Session Persistence** — Stay logged in between app restarts
 - **Native Notifications** — HubSpot alerts as Mac notifications
 - **Dock Badge** — See unread counts at a glance
@@ -14,6 +16,7 @@ A native Mac desktop app for HubSpot. No more browser tabs — access HubSpot di
 
 | Shortcut | Action |
 |----------|--------|
+| `Cmd+Shift+H` | **Show/Hide app (global)** |
 | `Cmd+1` | Dashboard |
 | `Cmd+2` | Contacts |
 | `Cmd+3` | Companies |
