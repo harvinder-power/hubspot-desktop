@@ -22,7 +22,7 @@ jobs:
       - run: npm ci
       - run: npm test
       # Linux runners have no display, so Electron runs under a virtual X server.
-      - run: ${{ runner.os == 'Linux' && 'xvfb-run -a -s "-screen 0 1920x1080x24" ' || '' }}npm run test:e2e
+      - run: ${{ runner.os == 'Linux' && 'xvfb-run -a ' || '' }}npm run test:e2e
       - if: failure()
         uses: actions/upload-artifact@v4
         with:

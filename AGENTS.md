@@ -38,6 +38,7 @@
   - `gh run view <run-id> --log-failed` prints the failing steps of every job.
   - The failed job uploads `test-results/` as the artifact `playwright-results-<os>`.
   - `gh run download <run-id> -n playwright-results-<os>` fetches it. Each failure has an `error-context.md`.
+- CI keeps one retry. On Linux the first screenshot after launch (`app.spec.js:88`) fails once, then passes.
 - Do not guess a fix from a test name. Read the failing log line first.
 - A test that fails because the app is wrong on one OS gets `test.fixme(process.platform === '<os>', '<reason>')` and an issue.
 
