@@ -1,4 +1,6 @@
 const { app, ipcMain } = require('electron');
+const { baseUrl } = require('./base-url');
+const { isAppOrigin } = require('./links');
 
 class DockManager {
   constructor(mainWindow) {
@@ -9,6 +11,7 @@ class DockManager {
 
   setupIPC() {
     ipcMain.on('set-unread-count', (event, count) => {
+      if (!isAppOrigin(event.senderFrame?.url, { base: baseUrl() })) return;
       this.updateBadge(count);
     });
   }
