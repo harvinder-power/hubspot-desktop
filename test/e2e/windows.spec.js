@@ -323,6 +323,68 @@ test.describe('native tab groups (CI only)', () => {
     await first.waitForURL(/\/idp\/authorize/);
     await expect.poll(onScreen).toEqual([true, true]);
   });
+
+  const visibility = async () => (await windowInfo()).map((w) => w.visible);
+  const release = () => fetch(`${idp.url}/release`);
+
+  // The first window opens a provider popup that the fixture holds, so the popup shows only on release.
+  async function heldPopupFromProvider() {
+    await startAt(app, first, `${fixture.url}/login`);
+    await first.evaluate((url) => { window.open(url); }, `${idp.url}/hold`);
+    await expect.poll(async () => (await windowInfo()).length).toBe(2);
+    await first.evaluate(() => document.querySelector('#idp-link').click());
+    await first.waitForURL(/\/idp\/authorize/);
+  }
+
+  test('a hidden last window on the provider page stays hidden when an outside popup shows', async () => {
+    try {
+      await heldPopupFromProvider();
+      await expect.poll(async () => (await visibility())[0]).toBe(true);
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[0].close());
+      console.log(`hidden last window: before release ${JSON.stringify(await visibility())}`);
+    } finally {
+      await release();
+    }
+    await expect.poll(visibility).toEqual([false, true]);
+    await first.waitForTimeout(1000);
+    console.log(`hidden last window: after the popup shows ${JSON.stringify(await visibility())}`);
+    expect(await visibility()).toEqual([false, true]);
+  });
+
+  test('a lone full-screen window on the provider page stays full screen when an outside popup shows', async () => {
+    let entered = false;
+    try {
+      await heldPopupFromProvider();
+      entered = await enterFullScreen(0);
+      console.log(`lone full screen: entered ${entered}`);
+    } finally {
+      await release();
+    }
+    test.skip(!entered, 'INCONCLUSIVE: the runner did not enter full screen');
+    await expect.poll(visibility).toEqual([true, true]);
+    await first.waitForTimeout(1000);
+    const full = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[0].isFullScreen());
+    console.log(`lone full screen: after the popup shows isFullScreen ${full}, onScreen ${JSON.stringify(await onScreen())}`);
+    expect(full).toBe(true);
+    await leaveFullScreen();
+  });
+
+  test('Window > Merge All Windows groups the app windows and leaves out a window on an outside page', async () => {
+    for (let i = 0; i < 2; i += 1) {
+      const [page] = await Promise.all([app.waitForEvent('window'), clickMenu('File', 'New Window')]);
+      await page.waitForURL(dashboardUrl());
+      if (i === 1) await toProvider(page);
+    }
+    await expect.poll(visibility).toEqual([true, true, true]);
+    await expect.poll(onScreen).toEqual([true, true, true]);
+    await clickMenu('Window', 'Merge All Windows');
+    const grouping = async () => {
+      const [a, b, outside] = await onScreen();
+      return { appWindowsGrouped: a !== b, outsideOnScreen: outside };
+    };
+    await expect.poll(grouping).toEqual({ appWindowsGrouped: true, outsideOnScreen: true });
+    console.log(`merge all windows: onScreen ${JSON.stringify(await onScreen())}`);
+  });
 });
 
 test('a sign-in popup is not a registry window: no tab identifier, no + button, locked title', async () => {
@@ -396,6 +458,71 @@ test('an outside page in an app window that replaces itself with about:blank kee
   await first.evaluate(() => { document.title = 'HubSpot'; });
   await first.waitForTimeout(500);
   expect((await windowInfo())[0].title).toBe('about: (external page)');
+});
+
+// URL, main-frame origin and title of the window at `index`, logged so a CI run records them.
+async function documentState(label, index) {
+  const state = await app.evaluate(({ BrowserWindow }, i) => {
+    const w = BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[i];
+    return { url: w.webContents.getURL(), origin: w.webContents.mainFrame.origin, title: w.getTitle() };
+  }, index);
+  console.log(`${label}: ${JSON.stringify(state)}`);
+  return state;
+}
+
+async function toProvider(page) {
+  await startAt(app, page, `${fixture.url}/login`);
+  await page.evaluate(() => document.querySelector('#idp-link').click());
+  await page.waitForURL(/\/idp\/authorize/);
+}
+
+// document.open() on the child's initial empty document cancels its pending navigation to the app.
+test('an app child that an outside page writes into before it commits keeps a locked title', async () => {
+  await toProvider(first);
+  // The child never commits a page, so Playwright reports no new page for it. Count windows instead.
+  const written = await first.evaluate((url) => {
+    try {
+      const w = window.open(url);
+      w.document.write('<title>HubSpot</title><p>x');
+      w.document.close();
+      return 'written';
+    } catch (error) {
+      return String(error);
+    }
+  }, dashboardUrl());
+  console.log(`outside-written app child: ${written}`);
+  await expect.poll(async () => (await windowInfo()).length).toBe(2);
+  await first.waitForTimeout(1500);
+  const state = await documentState('outside-written app child', 1);
+  expect(state.url).not.toBe(dashboardUrl());
+  expect(state.origin).toBe(idp.url);
+  expect(state.title).toBe('unknown (external page)');
+});
+
+// The app opens a named blank child. Its opener goes to the provider, which reaches the child by name
+// and replaces its first document with a blank page of the provider's origin.
+test('a named blank child the app opened keeps a locked title once the provider replaces its page', async () => {
+  const [child] = await Promise.all([
+    app.waitForEvent('window'),
+    first.evaluate(() => {
+      const w = window.open('', 'report');
+      w.document.write('<title>Report</title><h1>Report</h1>');
+      w.document.close();
+    }),
+  ]);
+  await expect.poll(async () => (await documentState('app-written named child', 1)).title).toBe('Report');
+  expect((await documentState('app-written named child', 1)).origin).toBe(fixture.url);
+  await toProvider(first);
+  await first.evaluate(() => {
+    globalThis.reached = window.open('', 'report');
+    globalThis.reached.location.replace('about:blank');
+  });
+  await expect.poll(async () => (await documentState('provider-replaced named child', 1)).origin).toBe(idp.url);
+  await first.evaluate(() => { globalThis.reached.document.title = 'HubSpot'; });
+  await child.waitForTimeout(500);
+  const state = await documentState('provider-titled named child', 1);
+  expect(state).toEqual({ url: 'about:blank', origin: idp.url, title: 'about: (external page)' });
+  expect(await windowInfo()).toHaveLength(2);
 });
 
 test('a target=_blank child on /login does not clear the portal for the other windows', async () => {
