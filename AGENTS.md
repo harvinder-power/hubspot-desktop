@@ -35,7 +35,7 @@
 - Linux runs e2e under `xvfb-run`. Windows needs no extra setup.
 - The Linux runner has no `libnotify4`, so the e2e suite stubs `Notification.isSupported()` with `show()`.
 - Off macOS, tests of macOS-only behaviour skip with a reason: native tab groups and the last window hiding.
-- The badge tests record every `app.setBadgeCount` call on every OS. Only macOS also reads `app.getBadgeCount()`: Linux needs a Unity launcher and Windows has no badge count. On Linux, Electron does not report the renderer sandbox flag.
+- The badge tests record every `app.setBadgeCount` call and read `app.getBadgeCount()` on every OS. No test checks that the Windows taskbar or a Linux launcher draws the count. On Linux, Electron does not report the renderer sandbox flag.
 - To read a failure on an OS you do not have:
   - `gh run view <run-id> --log-failed` prints the failing steps of every job.
   - The failed job uploads `test-results/` as the artifact `playwright-results-<os>`.

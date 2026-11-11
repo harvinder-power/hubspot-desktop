@@ -4,8 +4,6 @@ const path = require('node:path');
 const fixtureServer = require('../fixture/server');
 const { launchApp, repoRoot, startAt } = require('./helpers');
 
-const isMac = process.platform === 'darwin';
-
 let fixture;
 let idp;
 let app;
@@ -15,15 +13,14 @@ let window;
 const dashboardUrl = () => `${fixture.url}/reports-dashboard/4242`;
 const titleUrl = (count) => `${fixture.url}/title/${count}`;
 
-// Every app.setBadgeCount call is recorded on every OS. app.getBadgeCount() reports the dock badge on macOS only:
-// on Linux it needs a Unity launcher, which CI lacks, and on Windows Electron has no badge count.
+// Every app.setBadgeCount call is recorded. CI measured app.getBadgeCount() equal to the set count on all three OSes.
 const badgeCalls = () => app.evaluate(() => globalThis.badgeCalls);
 const lastBadge = async () => (await badgeCalls()).at(-1) ?? 0;
-const dockBadge = () => app.evaluate(({ app: electronApp }) => electronApp.getBadgeCount());
+const appBadge = () => app.evaluate(({ app: electronApp }) => electronApp.getBadgeCount());
 
 async function expectBadge(count) {
   await expect.poll(lastBadge).toBe(count);
-  if (isMac) expect(await dockBadge()).toBe(count);
+  expect(await appBadge()).toBe(count);
 }
 
 test.beforeAll(async () => {
