@@ -92,11 +92,11 @@ test.beforeEach(async () => {
   });
 });
 
-// Each test starts with the main window's bar closed.
+// Each test starts with the main window's bar closed. The close goes through the bar's own IPC route.
 test.afterEach(async () => {
-  if ((await layout()).children.length === 0) return;
-  const bar = await findBar();
-  await bar.press('#query', 'Escape');
+  await app.evaluate(({ ipcMain }) => {
+    for (const view of globalThis.mainWin.contentView.children) ipcMain.emit('find:event', { sender: view.webContents }, { type: 'close' });
+  });
   await expect.poll(async () => (await layout()).children).toEqual([]);
 });
 
@@ -286,7 +286,7 @@ test('find events from the page are ignored and the page has no find bridge', as
   expect((await findCalls()).length).toBe(before);
 });
 
-test('the find bar is isolated, cannot navigate and opens no windows', async () => {
+test('the find bar is isolated and has a frozen, minimal bridge', async () => {
   await clickEdit('Find...');
   const bar = await findBar();
   const facts = await app.evaluate(() => {
@@ -308,15 +308,6 @@ test('the find bar is isolated, cannot navigate and opens no windows', async () 
     keys: ['onState', 'platform', 'send'],
     frozen: true,
   });
-
-  const url = bar.url();
-  await bar.evaluate(() => {
-    location.href = 'https://example.com/';
-  });
-  expect(await bar.evaluate(() => window.open('https://example.com/'))).toBeNull();
-  await bar.waitForTimeout(500);
-  expect(bar.url()).toBe(url);
-  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
 });
 
 test('the find-bar session denies permission requests and checks', async () => {
@@ -370,19 +361,32 @@ test('the query field has a visible focus outline with 3:1 contrast in light and
     });
   try {
     for (const scheme of ['light', 'dark']) {
-      await app.evaluate(({ nativeTheme }, source) => {
-        nativeTheme.themeSource = source;
-      }, scheme);
-      await expect.poll(() => bar.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches)).toBe(scheme === 'dark');
+      await bar.emulateMedia({ colorScheme: scheme });
+      expect(await bar.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches)).toBe(scheme === 'dark');
       const { style, width, color, surface } = await ring();
       // A real outline, so forced-colors mode keeps it.
       expect(style, scheme).toBe('solid');
       expect(width, scheme).toBeGreaterThanOrEqual(2);
       expect(contrast(color, surface), `${scheme}: ${color} on ${surface}`).toBeGreaterThanOrEqual(3);
     }
+    await bar.emulateMedia({ forcedColors: 'active' });
+    expect(await bar.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
+    expect((await ring()).style).toBe('solid');
   } finally {
-    await app.evaluate(({ nativeTheme }) => {
-      nativeTheme.themeSource = 'system';
-    });
+    await bar.emulateMedia({ colorScheme: null, forcedColors: null });
   }
+});
+
+// Last: Playwright keeps waiting on the bar page's refused navigation, so no later test can drive the bar.
+test('the find bar cannot navigate and opens no windows', async () => {
+  await clickEdit('Find...');
+  const bar = await findBar();
+  const url = bar.url();
+  await bar.evaluate(() => {
+    location.href = 'https://example.com/';
+  });
+  expect(await bar.evaluate(() => window.open('https://example.com/'))).toBeNull();
+  await bar.waitForTimeout(500);
+  expect(bar.url()).toBe(url);
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
 });

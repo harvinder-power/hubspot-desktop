@@ -1,9 +1,10 @@
 // Find in page. reduce() is pure and must not require electron, so node --test can load it.
-// State: { open, query, active, total }. Events: { type: 'open' | 'close' | 'next' | 'previous' | 'navigated' },
+// State: { open, query, active, total, pending }. Events: { type: 'open' | 'close' | 'next' | 'previous' | 'navigated' },
 // { type: 'query', text } and { type: 'result', active, total }.
 // reduce returns { state, effect }. effect is { find: { text, forward, findNext } }, { stop: true } or null.
 // findNext follows Electron: true starts a new search session, false steps through the current one.
-const INITIAL = Object.freeze({ open: false, query: '', active: 0, total: 0 });
+// pending is true from a new search session until its first result, so the label never shows stale counts.
+const INITIAL = Object.freeze({ open: false, query: '', active: 0, total: 0, pending: false });
 
 // The Edit menu items. One table, so the accelerators can change in one place.
 const FIND_MENU_ITEMS = [
@@ -14,37 +15,40 @@ const FIND_MENU_ITEMS = [
 
 const BAR_EVENTS = ['query', 'next', 'previous', 'close'];
 const MAX_QUERY = 500;
-const BAR_SIZE = { width: 360, height: 44 };
+// The view is exactly the drawn bar, so no transparent margin takes the page's clicks.
+const BAR_SIZE = { width: 344, height: 36 };
+const BAR_GAP = 8;
 const FIND_PARTITION = 'find-bar';
 
 const search = (text, forward, findNext) => ({ find: { text, forward, findNext } });
-const cleared = (state) => ({ ...state, active: 0, total: 0 });
+const cleared = (state) => ({ ...state, active: 0, total: 0, pending: false });
 
 function reduce(state, event) {
   const same = { state, effect: null };
   switch (event.type) {
     case 'open':
       if (state.open) return same;
-      return { state: { ...state, open: true }, effect: state.query ? search(state.query, true, true) : null };
+      return { state: { ...state, open: true, pending: Boolean(state.query) }, effect: state.query ? search(state.query, true, true) : null };
     case 'close':
       return state.open ? { state: cleared({ ...state, open: false }), effect: { stop: true } } : same;
     case 'query':
       if (!state.open || event.text === state.query) return same;
       if (!event.text) return { state: cleared({ ...state, query: '' }), effect: { stop: true } };
-      return { state: { ...state, query: event.text }, effect: search(event.text, true, true) };
+      return { state: { ...state, query: event.text, pending: true }, effect: search(event.text, true, true) };
     case 'next':
     case 'previous':
       return state.open && state.query ? { state, effect: search(state.query, event.type === 'next', false) } : same;
     case 'navigated':
-      return state.open && state.query ? { state, effect: search(state.query, true, true) } : same;
+      return state.open && state.query ? { state: { ...state, pending: true }, effect: search(state.query, true, true) } : same;
     case 'result':
-      return state.open && state.query ? { state: { ...state, active: event.active, total: event.total }, effect: null } : same;
+      if (!state.open || !state.query) return same;
+      return { state: { ...state, active: event.active, total: event.total, pending: false }, effect: null };
     default:
       return same;
   }
 }
 
-const countLabel = ({ query, active, total }) => (!query ? '' : total ? `${active} of ${total}` : 'No results');
+const countLabel = ({ query, active, total, pending }) => (!query || pending ? '' : total ? `${active} of ${total}` : 'No results');
 
 // Parses a message from the bar. Returns a bar event, or null for anything else.
 function parseBarEvent(message) {
@@ -61,7 +65,7 @@ function routeBarEvent(bars, sender, message) {
 }
 
 function barBounds({ width }) {
-  return { x: Math.max(0, width - BAR_SIZE.width), y: 0, ...BAR_SIZE };
+  return { x: Math.max(0, width - BAR_SIZE.width - BAR_GAP), y: 0, ...BAR_SIZE };
 }
 
 // One bar per app window, made on first use. The page is never scripted: only findInPage and stopFindInPage.
@@ -113,9 +117,9 @@ function createBar(win, bars) {
   page.on('found-in-page', (event, result) => {
     if (result.requestId === request) dispatch({ type: 'result', active: result.activeMatchOrdinal, total: result.matches });
   });
-  // A new page in the main frame makes the counts stale, so the search runs again.
+  // A new document makes the counts stale, so the search runs again. A same-document navigation does not:
+  // HubSpot calls history.replaceState often, and a new search there would reset the active match.
   page.on('did-navigate', () => dispatch({ type: 'navigated' }));
-  page.on('did-navigate-in-page', (event, url, isMainFrame) => isMainFrame && dispatch({ type: 'navigated' }));
   win.on('resize', () => state.open && place());
   win.on('closed', () => {
     bars.delete(contents);
@@ -127,18 +131,22 @@ function createBar(win, bars) {
   return bar;
 }
 
-// Find actions for the menu. Each acts on registry.active() and does nothing without a window.
+// Find actions for the menu. Each acts on the focused window, any window.open child included.
+// With no focused window (a quiet run) it acts on registry.active(). It does nothing without a window.
 function createFind(registry) {
-  const { ipcMain } = require('electron');
+  const { BrowserWindow, ipcMain, session } = require('electron');
   const bars = new Map();
   const byWindow = new WeakMap();
+  const barSession = session.fromPartition(FIND_PARTITION);
+  barSession.setPermissionRequestHandler((contents, permission, callback) => callback(false));
+  barSession.setPermissionCheckHandler(() => false);
   ipcMain.on('find:event', (event, message) => routeBarEvent(bars, event.sender, message));
   const barFor = (win) => {
     if (!byWindow.has(win)) byWindow.set(win, createBar(win, bars));
     return byWindow.get(win);
   };
   const act = (type) => () => {
-    const win = registry.active();
+    const win = BrowserWindow.getFocusedWindow() ?? registry.active();
     if (!win || win.isDestroyed()) return;
     if (type === 'open' || byWindow.has(win)) barFor(win).dispatch({ type });
   };
