@@ -61,14 +61,15 @@ function tabEligible({ inRegistry, committedKind }) {
 
 const isWebUrl = (url) => ['http:', 'https:'].includes(parse(url)?.protocol);
 
-// The window title for an outside page, host first. Null means the page owns its title.
-// A blank page owns its title only while it is the first document of a blank child the app opened
-// (`appOpenedBlank`, history entry 0), so the app can title a page it writes into.
-// Every other blank page is locked: an outside page can commit about:blank itself, also by location.replace.
-function lockedTitle(committedUrl, { base = DEFAULT_BASE_URL, activeIndex = 0, appOpenedBlank = false } = {}) {
+// The window title for a page that may not choose its own, host first. Null means the page owns its title.
+// `origin` is the origin of the committed document (the main frame's origin), not of its URL.
+// An app page owns its title. An empty or blank document inherits the origin of the page that created
+// or navigated it, so it owns its title only when that origin is the app origin: the app can title
+// a page it writes into, and an outside page that writes into or navigates a window cannot.
+function lockedTitle(committedUrl, { base = DEFAULT_BASE_URL, origin = 'null' } = {}) {
   const kind = pageKind(committedUrl, { base });
-  const ownBlank = kind === 'blank' && appOpenedBlank && activeIndex === 0;
-  if (kind !== 'outside' && (kind !== 'blank' || ownBlank)) return null;
+  if (kind === 'app' || kind === 'app-sign-in') return null;
+  if ((kind === 'none' || kind === 'blank') && isAppOrigin(origin, { base })) return null;
   const url = parse(committedUrl);
   return `${url?.hostname || url?.protocol || 'unknown'} (external page)`;
 }

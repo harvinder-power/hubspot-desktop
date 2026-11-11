@@ -65,7 +65,7 @@ function idpPage(returnTo) {
 <a id="return-link" href="${escapeHtml(returnTo)}">Continue to HubSpot</a>`);
 }
 
-function handle(req, res, { portalId, idpOrigin, chainOrigin, rootToIdp }) {
+function handle(req, res, { portalId, idpOrigin, chainOrigin, rootToIdp, held }) {
   const { pathname, searchParams } = new URL(req.url, 'http://fixture');
   const returnTo = `http://${req.headers.host}/reports-dashboard/${portalId}`;
   const authorize = (origin) => `${origin}/idp/authorize?return_to=${encodeURIComponent(returnTo)}`;
@@ -89,6 +89,16 @@ function handle(req, res, { portalId, idpOrigin, chainOrigin, rootToIdp }) {
       res.end(page('Slow', '<h1>Slow</h1>'));
     }, 2000);
   }
+  // /hold answers only when /release is requested, so a test decides when a window shows.
+  if (pathname === '/hold') return held.push(res);
+  if (pathname === '/release') {
+    for (const waiting of held.splice(0)) {
+      waiting.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      waiting.end(page('Held', '<h1>Held</h1>'));
+    }
+    res.writeHead(204);
+    return res.end();
+  }
   const title = pathname.match(/^\/title\/(\d+)$/);
   let html;
   if (title) html = page(`(${title[1]}) Inbox`, `<h1>(${title[1]}) Inbox</h1>`);
@@ -104,7 +114,7 @@ function handle(req, res, { portalId, idpOrigin, chainOrigin, rootToIdp }) {
 
 // `chainOrigin` is the second provider for /chain-out. `rootToIdp` makes / redirect to the provider.
 function start(port = 0, { portalId = '111', idpOrigin = '', chainOrigin = '', rootToIdp = false } = {}) {
-  const options = { portalId, idpOrigin, chainOrigin, rootToIdp };
+  const options = { portalId, idpOrigin, chainOrigin, rootToIdp, held: [] };
   const server = http.createServer((req, res) => handle(req, res, options));
   return new Promise((resolve, reject) => {
     server.once('error', reject);

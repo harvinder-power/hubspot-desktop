@@ -42,7 +42,7 @@
   - `gh run download <run-id> -n playwright-results-<os>` fetches it. Each failure has an `error-context.md`.
 - CI keeps one retry for two known flakes. Both pass on retry:
   - `app.spec.js:88`, Linux only: the first screenshot after launch fails with `Unable to capture screenshot`.
-  - `windows.spec.js:190`, Linux and Windows: the focus poll times out, so OS focus did not move in time.
+  - `windows.spec.js`, the `focusWindow` helper, Linux and Windows: the focus poll times out, so OS focus did not move in time.
 - Do not guess a fix from a test name. Read the failing log line first.
 - A test that fails because the app is wrong on one OS gets `test.fixme(process.platform === '<os>', '<reason>')` and an issue.
 
