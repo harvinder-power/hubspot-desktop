@@ -1,6 +1,6 @@
 const { app, BrowserWindow } = require('electron');
 const windowStateKeeper = require('electron-window-state');
-const { pageKind, childWindowKind, tabEligible } = require('./links');
+const { isAppOrigin, pageKind, childWindowKind, tabEligible } = require('./links');
 
 // Windows with the same identifier join one native tab group on macOS.
 const TABBING_IDENTIFIER = 'hubspot-desktop';
@@ -85,11 +85,20 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
 
   // Children of any window, already secured by their opener. The kind comes from the requested URL,
   // with the same function that chose the child's window options.
+  // The opener is read from the origin of the document that opened the child.
   function watchChildren(win) {
     win.webContents.on('did-create-window', (child, { url }) => {
-      if (childWindowKind(url, { base }) === 'app') track(child, { host: isMac ? win : null, pageOpened: true });
+      const opener = isAppOrigin(win.webContents.mainFrame.origin, { base }) ? 'app' : 'outside';
+      if (childWindowKind(url, { base }) === 'app') track(child, { host: isMac ? win : null, opener });
       else popup(child);
     });
+  }
+
+  // Window > Merge All Windows. macOS merges every window, so each one is checked afterwards.
+  function mergeAll() {
+    if (!isMac || quiet) return;
+    [...windows].reverse().find((win) => eligible(win) && win.isVisible())?.mergeAllWindows();
+    for (const other of BrowserWindow.getAllWindows()) enforceTabs(other);
   }
 
   function popup(win) {
@@ -102,8 +111,8 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
 
   // host is the window the new one may join as a tab. It joins at ready-to-show, when the window has
   // committed its first page, and only when both windows are eligible then.
-  // pageOpened: a page opened the window (it is a child, not a menu or + button window).
-  function track(win, { host, state = null, pageOpened = false }) {
+  // opener: null for a menu or + button window, else 'app' or 'outside' for the page that opened it.
+  function track(win, { host, state = null, opener = null }) {
     windows.add(win);
     guard(win);
     let closedEarly = false;
@@ -129,7 +138,7 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
       if (state?.isMaximized) win.maximize();
     });
     watchChildren(win);
-    for (const listener of listeners) listener(win, { pageOpened });
+    for (const listener of listeners) listener(win, { opener });
   }
 
   function show() {
@@ -146,6 +155,7 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
     open,
     active,
     show,
+    mergeAll,
     all: () => [...windows],
     onWindow: (listener) => listeners.push(listener),
   };

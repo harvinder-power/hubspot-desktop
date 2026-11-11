@@ -89,10 +89,9 @@ test('childWindowKind makes app and blank children app windows and every other c
   assert.equal(childWindowKind('http://127.0.0.1:4322/idp/authorize', { base: OVERRIDE }), 'outside-popup');
 });
 
-test('lockedTitle is null for app pages and the empty page, and names the host otherwise', () => {
+test('lockedTitle is null for app pages and names the host of an outside page', () => {
   assert.equal(lockedTitle(RECORD), null);
   assert.equal(lockedTitle(LOGIN), null);
-  assert.equal(lockedTitle(''), null);
   assert.equal(lockedTitle('https://idp.example/authorize?x=1'), 'idp.example (external page)');
   assert.equal(lockedTitle(`https://${String.fromCodePoint(0x430)}pple.com/`), 'xn--pple-43d.com (external page)');
   assert.equal(lockedTitle('about:srcdoc'), 'about: (external page)');
@@ -100,24 +99,30 @@ test('lockedTitle is null for app pages and the empty page, and names the host o
   assert.equal(lockedTitle('http://127.0.0.1:4322/idp', { base: OVERRIDE }), '127.0.0.1 (external page)');
 });
 
-// Each row is a window history that ends on a blank page, and whether the app opened the window blank.
-// The caller passes appOpenedBlank only while the window has committed nothing but blank pages.
-test('lockedTitle unlocks a blank page only as entry 0 of a blank child the app opened', () => {
-  const LOCKED = 'about: (external page)';
+// Every page kind against the app origin, an outside origin and an opaque origin.
+// The origin is the committed document's: for '' and about:blank it is inherited from the creator.
+test('lockedTitle unlocks an empty or blank document only when its origin is the app origin', () => {
+  const ORIGINS = { app: 'https://app.hubspot.com', outside: 'https://example-corp.okta.com', opaque: 'null' };
   const rows = [
-    { history: ['about:blank'], appOpenedBlank: true, title: null },
-    { history: [LOGIN, 'about:blank'], appOpenedBlank: false, title: LOCKED },
-    { history: [OKTA, 'about:blank'], appOpenedBlank: false, title: LOCKED },
-    { history: [RECORD, OKTA, 'about:blank'], appOpenedBlank: false, title: LOCKED },
-    { history: ['about:blank'], appOpenedBlank: false, title: LOCKED },
-    { history: ['about:blank', 'about:blank'], appOpenedBlank: true, title: LOCKED },
+    { url: '', titles: { app: null, outside: 'unknown (external page)', opaque: 'unknown (external page)' } },
+    { url: 'about:blank', titles: { app: null, outside: 'about: (external page)', opaque: 'about: (external page)' } },
+    { url: LOGIN, titles: { app: null, outside: null, opaque: null } },
+    { url: RECORD, titles: { app: null, outside: null, opaque: null } },
+    {
+      url: OKTA,
+      titles: Object.fromEntries(Object.keys(ORIGINS).map((name) => [name, 'example-corp.okta.com (external page)'])),
+    },
   ];
-  for (const { history, appOpenedBlank, title } of rows) {
-    const options = { activeIndex: history.length - 1, appOpenedBlank };
-    assert.equal(lockedTitle(history.at(-1), options), title, JSON.stringify({ history, appOpenedBlank }));
+  for (const { url, titles } of rows) {
+    assert.equal(pageKind(url) === 'outside', url === OKTA);
+    for (const [name, origin] of Object.entries(ORIGINS)) {
+      assert.equal(lockedTitle(url, { origin }), titles[name], JSON.stringify({ url, origin }));
+    }
   }
-  assert.equal(lockedTitle(RECORD, { activeIndex: 0, appOpenedBlank: true }), null);
-  assert.equal(lockedTitle(OKTA, { activeIndex: 0, appOpenedBlank: true }), 'example-corp.okta.com (external page)');
+  assert.equal(lockedTitle('about:blank'), 'about: (external page)');
+  assert.equal(lockedTitle('', { base: OVERRIDE, origin: OVERRIDE }), null);
+  assert.equal(lockedTitle('', { base: OVERRIDE, origin: 'http://127.0.0.1:4322' }), 'unknown (external page)');
+  assert.equal(lockedTitle('about:blank', { origin: 'https://app.hubspot.com.evil.example' }), 'about: (external page)');
 });
 
 test('tabEligible is true only for a registry window on an app or app sign-in page', () => {
@@ -233,7 +238,7 @@ test('a blank page reaches only app-origin and everything-else, and grants nothi
   const BLANK = 'about:blank';
   assert.equal(pageKind(BLANK), 'blank');
   assert.equal(lockedTitle(BLANK), 'about: (external page)');
-  assert.equal(lockedTitle(BLANK, { activeIndex: 0, appOpenedBlank: true }), null);
+  assert.equal(lockedTitle(BLANK, { origin: 'https://app.hubspot.com' }), null);
   const expected = [
     [{ url: RECORD, kind: 'navigate' }, 'allow'],
     [{ url: RECORD, kind: 'open' }, 'allow'],

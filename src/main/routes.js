@@ -35,15 +35,17 @@ function resolve(routeId, context, { base = DEFAULT_BASE_URL } = {}) {
   return context.origin + route.path(context.portalId);
 }
 
-// The last portal context of the main frame. An app sign-in page clears it (signed out), unless a page
-// opened that window: a link to /login in a new window does not sign out the other windows.
-// An outside page (mid sign-in) or an app page without a portal ID keeps the previous one.
+// The last portal context of the main frame. `opener` says what opened the window: null (the app's own
+// menus and buttons), 'app' (an app page) or 'outside' (an outside page).
+// An app sign-in page clears it (signed out), unless a page opened that window and other windows remain:
+// a link to /login in a new window does not sign out the other windows. A window an outside page opened
+// never sets it. An outside page (mid sign-in) or an app page without a portal ID keeps the previous one.
 function portalTracker({ base = DEFAULT_BASE_URL } = {}) {
   let last = null;
   return {
-    observe(url, { pageOpened = false } = {}) {
-      const signedOut = pageKind(url, { base }) === 'app-sign-in' && !pageOpened;
-      last = signedOut ? null : portalContext(url, { base }) ?? last;
+    observe(url, { opener = null, alone = false } = {}) {
+      if (pageKind(url, { base }) === 'app-sign-in' && (opener === null || alone)) last = null;
+      else if (opener !== 'outside') last = portalContext(url, { base }) ?? last;
     },
     get context() {
       return last;
