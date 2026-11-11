@@ -81,14 +81,14 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
     win.on('closed', () => windows.delete(win));
     win.once('ready-to-show', () => {
       // A window closed before its first paint stays closed or hidden.
-      if (quiet || win.isDestroyed()) return;
+      if (quiet || closedEarly || win.isDestroyed()) return;
       // A tab joins its group once its contents are ready. Added at creation, it joined in 1 of 3 CI runs.
       const tabHost = host();
       if (tabHost && !tabHost.isDestroyed() && tabHost.isVisible()) tabHost.addTabbedWindow(win);
       win.show();
       if (state?.isMaximized) win.maximize();
     });
-    win.webContents.on('did-create-window', (child) => child.once('ready-to-show', () => child.show()));
+    win.webContents.on('did-create-window', (child) => adopt(child, { opener: win }));
     for (const listener of listeners) listener(win);
   }
 
