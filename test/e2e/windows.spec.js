@@ -111,6 +111,82 @@ test('on macOS New Tab joins the native tab group and New Window does not', asyn
   await page.screenshot({ path: path.join(evidenceDir, 'new-window.png') });
 });
 
+// DIAGNOSTIC: logs candidate tab-membership signals in CI. Removed once a signal is chosen.
+const { execFileSync } = require('node:child_process');
+const os = require('node:os');
+const probe = path.join(os.tmpdir(), 'hubspot-desktop-cg-windows');
+const settle = () => new Promise((resolve) => setTimeout(resolve, 1000));
+async function snapshot(label) {
+  const electronSide = await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()
+      .sort((a, b) => a.id - b.id)
+      .map((w) => ({
+        id: w.id,
+        cg: Number(w.getMediaSourceId().split(':')[1]),
+        visible: w.isVisible(),
+        focused: w.isFocused(),
+        bounds: w.getBounds(),
+        content: w.getContentBounds(),
+      }))
+  );
+  const cg = JSON.parse(execFileSync(probe, [String(app.process().pid)], { encoding: 'utf8' }));
+  const rows = electronSide.map((w) => {
+    const native = cg.find((c) => c.number === w.cg);
+    return { ...w, onScreen: native?.onScreen ?? null, layer: native?.layer ?? null, cgBounds: native?.bounds ?? null, name: native?.name };
+  });
+  console.log(`DIAG ${label}: ${JSON.stringify(rows)}`);
+  console.log(`DIAG ${label} cg-all: ${JSON.stringify(cg.filter((c) => c.layer === 0))}`);
+}
+const selectNextTab = (index) => app.evaluate(({ BrowserWindow }, i) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[i].selectNextTab(), index);
+
+test.describe('DIAG tab signals', () => {
+  test.skip(quiet || !isMac, 'diagnostic needs visible macOS windows');
+  test.beforeAll(() => {
+    execFileSync('swiftc', ['-O', '-o', probe, path.join(__dirname, 'tools', 'cg-windows.swift')], { stdio: 'inherit' });
+  });
+  for (const run of [1, 2, 3]) {
+    test(`DIAG A New Tab as built run ${run}`, async () => {
+      await newTab();
+      await expect.poll(async () => (await windowInfo()).length).toBe(2);
+      await settle();
+      await snapshot(`A${run} after New Tab`);
+      await selectNextTab(0);
+      await settle();
+      await snapshot(`A${run} after host.selectNextTab`);
+      await selectNextTab(0);
+      await settle();
+      await snapshot(`A${run} after second host.selectNextTab`);
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[1].moveTabToNewWindow());
+      await settle();
+      await snapshot(`A${run} after tab.moveTabToNewWindow`);
+    });
+    test(`DIAG B addTabbedWindow after show run ${run}`, async () => {
+      await Promise.all([app.waitForEvent('window'), clickMenu('File', 'New Window')]);
+      await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true]);
+      await settle();
+      await snapshot(`B${run} separate before addTabbedWindow`);
+      await app.evaluate(({ BrowserWindow }) => {
+        const [host, win] = BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id);
+        host.addTabbedWindow(win);
+      });
+      await settle();
+      await snapshot(`B${run} after addTabbedWindow`);
+      await selectNextTab(0);
+      await settle();
+      await snapshot(`B${run} after host.selectNextTab`);
+    });
+    test(`DIAG C New Window run ${run}`, async () => {
+      await Promise.all([app.waitForEvent('window'), clickMenu('File', 'New Window')]);
+      await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true]);
+      await settle();
+      await snapshot(`C${run} after New Window`);
+      await selectNextTab(0);
+      await settle();
+      await snapshot(`C${run} after host.selectNextTab`);
+    });
+  }
+});
+
 test('File > New Window opens a second window, and Cmd+T and Cmd+N belong to New Tab and New Window only', async () => {
   const [page] = await Promise.all([app.waitForEvent('window'), clickMenu('File', 'New Window')]);
   await page.waitForURL(dashboardUrl());
