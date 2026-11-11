@@ -7,10 +7,10 @@ const NotificationManager = require('./notifications');
 const DockManager = require('./dock');
 const WindowManager = require('./window-state');
 const TrayManager = require('./tray');
+const { baseUrl } = require('./base-url');
 
 // Constants
 const PARTITION = 'persist:hubspot';
-const HUBSPOT_URL = 'https://app.hubspot.com';
 const GLOBAL_SHORTCUT = 'CommandOrControl+Shift+H';
 
 // Managers
@@ -18,6 +18,10 @@ let windowManager;
 let notificationManager;
 let dockManager;
 let trayManager;
+
+if (!app.isPackaged && process.env.HUBSPOT_DESKTOP_USER_DATA) {
+  app.setPath('userData', process.env.HUBSPOT_DESKTOP_USER_DATA);
+}
 
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
@@ -62,7 +66,7 @@ app.whenReady().then(async () => {
   });
 
   // Load HubSpot
-  mainWindow.loadURL(HUBSPOT_URL);
+  mainWindow.loadURL(baseUrl());
 
   // Handle macOS dock click
   app.on('activate', () => {

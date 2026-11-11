@@ -1,4 +1,5 @@
 const { app, Menu, shell } = require('electron');
+const { baseUrl, portalPrefix } = require('./base-url');
 
 function createMenu(mainWindow) {
   const isMac = process.platform === 'darwin';
@@ -214,14 +215,14 @@ function navigateTo(mainWindow, path) {
   const currentUrl = mainWindow.webContents.getURL();
 
   // Try to extract the portal base URL (includes portal ID)
-  const match = currentUrl.match(/https:\/\/app\.hubspot\.com\/[^/]+\/\d+/);
+  const prefix = portalPrefix(currentUrl);
 
-  if (match) {
+  if (prefix) {
     // Navigate within the same portal
-    mainWindow.webContents.loadURL(`${match[0]}${path}`);
+    mainWindow.webContents.loadURL(`${prefix}${path}`);
   } else {
     // Fallback: just go to the main HubSpot page with the path
-    mainWindow.webContents.loadURL(`https://app.hubspot.com${path}`);
+    mainWindow.webContents.loadURL(`${baseUrl()}${path}`);
   }
 }
 
