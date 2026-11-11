@@ -9,6 +9,9 @@ const evidenceDir = process.env.EVIDENCE_DIR || path.join(repoRoot, 'test-result
 // Local runs are quiet (no shown window, no focus) unless HUBSPOT_DESKTOP_QUIET=0. CI runs visible.
 const quiet = (process.env.HUBSPOT_DESKTOP_QUIET ?? (process.env.CI ? '0' : '1')) === '1';
 
+// Electron reports ProcessMetric.sandboxed on macOS and Windows only. On Linux the field is absent.
+const sandboxReported = process.platform !== 'linux';
+
 // Launches the app against `baseUrl` with its own user-data directory and a stubbed shell.openExternal.
 async function launchApp(baseUrl, { quiet: launchQuiet = quiet } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubspot-desktop-e2e-'));
@@ -36,4 +39,4 @@ async function startAt(electronApp, page, url) {
   await electronApp.evaluate(() => { globalThis.openedExternally = []; });
 }
 
-module.exports = { repoRoot, evidenceDir, quiet, launchApp, startAt };
+module.exports = { repoRoot, evidenceDir, quiet, sandboxReported, launchApp, startAt };

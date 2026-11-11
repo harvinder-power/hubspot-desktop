@@ -26,6 +26,24 @@
 - Agents never force a visible local run without the coordinator's say.
 - `npm run fixture` serves the fixture on `http://127.0.0.1:4321` for manual checks.
 
+## CI
+
+- CI runs `npm test` and `npm run test:e2e` on `macos-latest`, `ubuntu-latest` and `windows-latest`.
+- One OS failing does not cancel the others (`fail-fast: false`).
+- Linux runs e2e under `xvfb-run`. Windows needs no extra setup.
+- The Linux runner has no `libnotify4`, so the e2e suite stubs `Notification.isSupported()` with `show()`.
+- Off macOS, tests of macOS-only behaviour skip with a reason: native tab groups and the last window hiding.
+- Off macOS, the dock badge assertions do not run. On Linux, Electron does not report the renderer sandbox flag.
+- To read a failure on an OS you do not have:
+  - `gh run view <run-id> --log-failed` prints the failing steps of every job.
+  - The failed job uploads `test-results/` as the artifact `playwright-results-<os>`.
+  - `gh run download <run-id> -n playwright-results-<os>` fetches it. Each failure has an `error-context.md`.
+- CI keeps one retry for two known flakes. Both pass on retry:
+  - `app.spec.js:88`, Linux only: the first screenshot after launch fails with `Unable to capture screenshot`.
+  - `windows.spec.js:190`, Linux and Windows: the focus poll times out, so OS focus did not move in time.
+- Do not guess a fix from a test name. Read the failing log line first.
+- A test that fails because the app is wrong on one OS gets `test.fixme(process.platform === '<os>', '<reason>')` and an issue.
+
 ## Fixture and overrides
 
 - `test/fixture/server.js` is a fake HubSpot. It imitates HubSpot URL shapes. It has no real data.
