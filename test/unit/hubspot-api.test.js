@@ -56,10 +56,10 @@ test('owners() follows pagination to the end', async (t) => {
   assert.deepEqual(api.requests.map((r) => r.path), ['/crm/owners/2026-09?limit=100', '/crm/owners/2026-09?limit=100&after=cursor-2']);
 });
 
-test('owners() stops after 10 pages even if HubSpot keeps sending a cursor', async (t) => {
+test('owners() stops at an empty page that still has a cursor and says the list is truncated', async (t) => {
   const { api, client } = await setup(t, { 'GET /crm/owners/2026-09': { body: { results: [], paging: { next: { after: 'again' } } } } });
-  assert.deepEqual(await client.owners(), { ok: true, data: [] });
-  assert.equal(api.requests.length, 10);
+  assert.deepEqual(await client.owners(), { ok: true, data: [], truncated: true });
+  assert.equal(api.requests.length, 1);
 });
 
 test('tasksDue() sends the owner, open-status and due-date filters, soonest first', async (t) => {
@@ -184,7 +184,7 @@ test('every HubSpot failure maps to exactly one error kind', async (t) => {
       assert.equal(typeof message, 'string');
     });
   }
-  assert.deepEqual(ERROR_KINDS, ['unauthorized', 'missing-scopes', 'forbidden', 'rate-limited', 'network', 'bad-response']);
+  assert.deepEqual(ERROR_KINDS, ['unauthorized', 'missing-scopes', 'forbidden', 'rate-limited', 'network', 'bad-response', 'invalid-input']);
 });
 
 test('a refused connection is a network error', async () => {
@@ -225,7 +225,7 @@ test('the token never appears in results, errors, request logs or console output
   const { api, client } = await setup(t, {
     'GET /account-info/2026-09/details': { status: 401, body: echo },
     'GET /crm/owners/2026-09': { status: 429, body: echo },
-    'POST /crm/objects/2026-09/tasks/search': missingScopes('crm.objects.tasks.read'),
+    'POST /crm/objects/2026-09/tasks/search': missingScopes(TOKEN),
     'POST /crm/objects/2026-09/meetings/search': { status: 500, body: echo },
     'POST /crm/objects/2026-09/contacts/search': { status: 403, body: echo },
   });
@@ -240,7 +240,9 @@ test('the token never appears in results, errors, request logs or console output
   ];
   assert.ok(results.every((r) => r.ok === false));
   assert.match(results[0].error.message, /\[token\]/);
-  const everything = JSON.stringify({ results, requests: api.requests, logged });
+  const missing = results.map((r) => r.error.missingScopes);
+  assert.deepEqual(missing[2], []);
+  const everything = JSON.stringify({ results, missing, requests: api.requests, logged });
   assert.equal(everything.includes(TOKEN), false);
   assert.equal(everything.includes('SECRET'), false);
 });
@@ -249,8 +251,8 @@ test('REQUIRED_SCOPES is a frozen table of read-only scopes', () => {
   assert.deepEqual(REQUIRED_SCOPES, {
     account: [],
     owners: ['crm.objects.owners.read'],
-    tasksDue: ['crm.objects.tasks.read'],
-    upcomingMeetings: ['crm.objects.meetings.read'],
+    tasksDue: ['crm.objects.contacts.read'],
+    upcomingMeetings: ['crm.objects.contacts.read'],
     search: { contacts: ['crm.objects.contacts.read'], companies: ['crm.objects.companies.read'], deals: ['crm.objects.deals.read'] },
   });
   assert.ok(Object.isFrozen(REQUIRED_SCOPES) && Object.isFrozen(REQUIRED_SCOPES.search) && Object.isFrozen(REQUIRED_SCOPES.owners));

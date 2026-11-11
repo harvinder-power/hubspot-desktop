@@ -1,16 +1,22 @@
 // Fake HubSpot REST API for tests. Serves only canned responses; no real data.
 // script: { 'METHOD /path': response | [response, ...] }, keyed on the path without its query.
 // response: { status = 200, headers = {}, body } where a string body is sent as is and any other body as JSON.
+// response { drop: true } closes the connection without an answer.
 // A queued array is served in order; its last entry repeats.
+// token: when given, any other bearer value gets a 401. The request log never stores the token.
 const http = require('node:http');
 
 const hubspotError = (category, message) => ({ status: 'error', message, correlationId: '00000000-0000-0000-0000-000000000000', category });
 
-function start(port = 0, { script = {} } = {}) {
+function start(port = 0, { script = {}, token } = {}) {
   const queues = new Map(Object.entries(script).map(([key, value]) => [key, Array.isArray(value) ? [...value] : [value]]));
   const requests = [];
 
-  const send = (res, { status = 200, headers = {}, body }) => {
+  const send = (res, { status = 200, headers = {}, body, drop = false }) => {
+    if (drop) {
+      res.socket.destroy();
+      return;
+    }
     const text = typeof body === 'string' ? body : JSON.stringify(body ?? {});
     const type = typeof body === 'string' ? 'text/html' : 'application/json';
     res.writeHead(status, { 'Content-Type': type, ...headers });
@@ -33,7 +39,7 @@ function start(port = 0, { script = {} } = {}) {
       if (headers.authorization) headers.authorization = auth.startsWith('Bearer ') ? 'Bearer [redacted]' : '[redacted]';
       requests.push({ method: req.method, path: req.url, headers, body });
 
-      if (!auth.startsWith('Bearer ') || auth.length <= 'Bearer '.length) {
+      if (!auth.startsWith('Bearer ') || auth.length <= 'Bearer '.length || (token !== undefined && auth !== `Bearer ${token}`)) {
         send(res, { status: 401, body: hubspotError('INVALID_AUTHENTICATION', 'Authentication credentials not found.') });
         return;
       }

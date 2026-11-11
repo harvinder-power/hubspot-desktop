@@ -4,31 +4,42 @@
 // Every function resolves, never rejects, to a Result:
 //   { ok: true, data }
 //   { ok: false, error: { kind, message, missingScopes?, retryAfterMs? } }
-// kind is one of the ERROR_KINDS below. search() may add `partial` to an ok Result.
+// kind is one of the ERROR_KINDS below. search() may add `partial` and owners() may add `truncated` to an ok Result.
+// invalid-input is returned before any request is sent.
 const { REQUIRED_SCOPES } = require('./scopes');
 const { OBJECT_TYPE_IDS, recordUrl } = require('./record-url');
 
 const API_VERSION = '2026-09';
-const ERROR_KINDS = Object.freeze(['unauthorized', 'missing-scopes', 'forbidden', 'rate-limited', 'network', 'bad-response']);
+const ERROR_KINDS = Object.freeze(['unauthorized', 'missing-scopes', 'forbidden', 'rate-limited', 'network', 'bad-response', 'invalid-input']);
 const OWNERS_PAGE_SIZE = 100;
 const MAX_OWNERS = 1000;
 const MAX_TASKS = 50;
 const MAX_MEETINGS = 20;
+const MAX_SEARCH_LIMIT = 200;
+const MAX_QUERY_LENGTH = 200;
 const TIMEOUT_MS = 15000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const APP_HOST = /^app(-[a-z]{2}[0-9]+)?\.hubspot\.com$/;
+const SCOPE_NAME = /^[a-z0-9._-]{1,100}$/;
 
 const ok = (data) => ({ ok: true, data });
 const fail = (kind, message, extra = {}) => ({ ok: false, error: { kind, message, ...extra } });
 const badShape = () => fail('bad-response', 'HubSpot answered with an unexpected shape');
+const invalid = (message) => fail('invalid-input', message);
 
 const str = (value) => (typeof value === 'string' && value !== '' ? value : null);
+const isOwnerId = (id) => (typeof id === 'string' && id !== '') || Number.isFinite(id);
+
+function timeOf(value) {
+  const ms = typeof value === 'number' ? value : typeof value === 'string' ? Date.parse(value) : NaN;
+  return Number.isNaN(new Date(ms).getTime()) ? null : ms;
+}
 
 function isoOrNull(value) {
   const text = str(value);
   if (!text) return null;
-  const ms = /^\d+$/.test(text) ? Number(text) : Date.parse(text);
-  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+  const date = new Date(/^\d+$/.test(text) ? Number(text) : Date.parse(text));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 // One row per searchable type: the properties to ask for and how a person recognises a hit.
@@ -58,10 +69,10 @@ function parseRetryAfter(value, now) {
   return Number.isNaN(at) ? undefined : Math.max(0, at - now());
 }
 
-function scopesFrom(body) {
-  const errors = Array.isArray(body?.errors) ? body.errors : [];
-  const scopes = errors.flatMap((e) => (Array.isArray(e?.context?.requiredGranularScopes) ? e.context.requiredGranularScopes : []));
-  return [...new Set(scopes.filter((s) => typeof s === 'string'))];
+function scopesFrom(body, scrub) {
+  const contexts = [body?.context, ...(Array.isArray(body?.errors) ? body.errors.map((e) => e?.context) : [])];
+  const listed = contexts.flatMap((c) => [c?.missingScopes, c?.requiredGranularScopes]).filter(Array.isArray).flat();
+  return [...new Set(listed.filter((s) => typeof s === 'string').map(scrub).filter((s) => SCOPE_NAME.test(s)))];
 }
 
 function searchRows(json) {
@@ -70,7 +81,8 @@ function searchRows(json) {
   return valid ? json.results : null;
 }
 
-function createClient({ token, fetch = globalThis.fetch, baseUrl = 'https://api.hubapi.com', now = () => Date.now() } = {}) {
+function createClient({ token, fetch = globalThis.fetch, baseUrl = 'https://api.hubapi.com', now = () => Date.now(), timeoutMs = TIMEOUT_MS } = {}) {
+  // Server-controlled text leaves the client only in error.message and error.missingScopes. Both pass through scrub.
   const scrub = (text) => (token ? String(text).split(token).join('[token]') : String(text));
 
   async function request(method, path, body) {
@@ -84,7 +96,7 @@ function createClient({ token, fetch = globalThis.fetch, baseUrl = 'https://api.
           ...(body ? { 'Content-Type': 'application/json' } : {}),
         },
         body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
       return fail('network', scrub(`Could not reach HubSpot (${err?.cause?.code || err?.name || 'error'})`));
@@ -99,7 +111,7 @@ function createClient({ token, fetch = globalThis.fetch, baseUrl = 'https://api.
     const { status } = res;
     if (status === 401) return fail('unauthorized', scrub(`HubSpot refused the token (401)${said}`));
     if (status === 403 && json?.category === 'MISSING_SCOPES') {
-      return fail('missing-scopes', scrub(`The token is missing scopes (403)${said}`), { missingScopes: scopesFrom(json) });
+      return fail('missing-scopes', scrub(`The token is missing scopes (403)${said}`), { missingScopes: scopesFrom(json, scrub) });
     }
     if (status === 403) return fail('forbidden', scrub(`HubSpot refused access (403)${said}`));
     if (status === 429) {
@@ -132,29 +144,33 @@ function createClient({ token, fetch = globalThis.fetch, baseUrl = 'https://api.
   async function owners() {
     const all = [];
     let after = null;
-    let pages = 0;
+    let rows;
+    // The loop stops at MAX_OWNERS, at the last page, or at an empty page that still has a cursor.
     do {
-      pages += 1;
       const query = new URLSearchParams({ limit: String(OWNERS_PAGE_SIZE) });
       if (after) query.set('after', after);
       const page = await request('GET', `/crm/owners/${API_VERSION}?${query}`);
       if (!page.ok) return page;
-      const rows = page.data?.results;
+      rows = page.data?.results;
       if (!Array.isArray(rows) || !rows.every((o) => o && typeof o.id === 'string')) return badShape();
       for (const o of rows) {
         const name = [str(o.firstName), str(o.lastName)].filter(Boolean).join(' ');
         all.push({ id: o.id, email: str(o.email), name: name || str(o.email) || o.id });
       }
       after = str(page.data?.paging?.next?.after);
-    } while (after && all.length < MAX_OWNERS && pages < MAX_OWNERS / OWNERS_PAGE_SIZE);
-    return ok(all.slice(0, MAX_OWNERS));
+    } while (after && all.length < MAX_OWNERS && rows.length > 0);
+    if (after || all.length > MAX_OWNERS) return { ok: true, data: all.slice(0, MAX_OWNERS), truncated: true };
+    return ok(all);
   }
 
-  async function tasksDue({ ownerId, before = new Date(now()).toISOString() }) {
+  async function tasksDue({ ownerId, before = new Date(now()).toISOString() } = {}) {
+    if (!isOwnerId(ownerId)) return invalid('ownerId must be a non-empty string or a number');
+    const beforeMs = timeOf(before);
+    if (beforeMs === null) return invalid('before must be a valid time');
     const result = await searchObjects('tasks', {
       filterGroups: ownerWindow(ownerId, [
         { propertyName: 'hs_task_status', operator: 'NEQ', value: 'COMPLETED' },
-        { propertyName: 'hs_timestamp', operator: 'LTE', value: String(Date.parse(before)) },
+        { propertyName: 'hs_timestamp', operator: 'LTE', value: String(beforeMs) },
       ]),
       sorts: [{ propertyName: 'hs_timestamp', direction: 'ASCENDING' }],
       properties: ['hs_task_subject', 'hs_timestamp', 'hs_task_type', 'hs_task_priority'],
@@ -170,10 +186,15 @@ function createClient({ token, fetch = globalThis.fetch, baseUrl = 'https://api.
     })));
   }
 
-  async function upcomingMeetings({ ownerId, from = new Date(now()).toISOString(), to = new Date(now() + DAY_MS).toISOString() }) {
+  async function upcomingMeetings({ ownerId, from = new Date(now()).toISOString(), to = new Date(now() + DAY_MS).toISOString() } = {}) {
+    if (!isOwnerId(ownerId)) return invalid('ownerId must be a non-empty string or a number');
+    const fromMs = timeOf(from);
+    const toMs = timeOf(to);
+    if (fromMs === null || toMs === null) return invalid('from and to must be valid times');
+    if (fromMs > toMs) return invalid('from must not be after to');
     const result = await searchObjects('meetings', {
       filterGroups: ownerWindow(ownerId, [
-        { propertyName: 'hs_meeting_start_time', operator: 'BETWEEN', value: String(Date.parse(from)), highValue: String(Date.parse(to)) },
+        { propertyName: 'hs_meeting_start_time', operator: 'BETWEEN', value: String(fromMs), highValue: String(toMs) },
       ]),
       sorts: [{ propertyName: 'hs_meeting_start_time', direction: 'ASCENDING' }],
       properties: ['hs_meeting_title', 'hs_meeting_start_time', 'hs_meeting_end_time'],
@@ -188,8 +209,10 @@ function createClient({ token, fetch = globalThis.fetch, baseUrl = 'https://api.
     })));
   }
 
-  async function search({ query, types = ['contacts', 'companies', 'deals'], limit = 5 }) {
-    const text = str(query && query.trim());
+  async function search({ query, types = ['contacts', 'companies', 'deals'], limit = 5 } = {}) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_SEARCH_LIMIT) return invalid(`limit must be an integer from 1 to ${MAX_SEARCH_LIMIT}`);
+    const text = typeof query === 'string' ? query.trim() : '';
+    if (text.length > MAX_QUERY_LENGTH) return invalid(`query must be at most ${MAX_QUERY_LENGTH} characters`);
     const known = types.filter((type) => Object.hasOwn(SEARCH_TYPES, type));
     if (!text || known.length === 0) return ok([]);
     const settled = await Promise.all(known.map(async (type) => ({
@@ -197,9 +220,8 @@ function createClient({ token, fetch = globalThis.fetch, baseUrl = 'https://api.
       result: await searchObjects(type, { query: text, properties: SEARCH_TYPES[type].properties, limit }),
     })));
     const failures = settled.filter((s) => !s.result.ok);
-    const hard = failures.find((f) => f.result.error.kind !== 'missing-scopes');
-    if (hard) return hard.result;
     if (failures.length === settled.length) {
+      if (!failures.every((f) => f.result.error.kind === 'missing-scopes')) return failures[0].result;
       const missingScopes = [...new Set(failures.flatMap((f) => f.result.error.missingScopes))];
       return fail('missing-scopes', 'The token has none of the scopes that search needs', { missingScopes });
     }
