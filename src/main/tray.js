@@ -3,9 +3,8 @@ const path = require('path');
 const { ROUTES } = require('./routes');
 
 class TrayManager {
-  constructor(mainWindow, windowManager, openRoute) {
-    this.mainWindow = mainWindow;
-    this.windowManager = windowManager;
+  constructor(registry, openRoute) {
+    this.registry = registry;
     this.openRoute = openRoute;
     this.tray = null;
     this.createTray();
@@ -35,15 +34,16 @@ class TrayManager {
   }
 
   toggleWindow() {
-    if (this.mainWindow.isVisible()) {
-      this.mainWindow.hide();
+    const win = this.registry.active();
+    if (win?.isVisible()) {
+      win.hide();
     } else {
-      this.windowManager.focusOrCreate();
+      this.registry.show();
     }
   }
 
   updateMenu() {
-    const show = () => this.windowManager.focusOrCreate();
+    const show = () => this.registry.show();
     this.tray.setContextMenu(Menu.buildFromTemplate(TrayManager.menuTemplate(show, this.openRoute)));
   }
 

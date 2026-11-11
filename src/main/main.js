@@ -1,21 +1,20 @@
-const { app, BrowserWindow, session, ipcMain, globalShortcut, shell } = require('electron');
+const { app, session, globalShortcut } = require('electron');
 const path = require('path');
 
 // Modules
 const { createMenu, createRouteOpener } = require('./menu');
 const NotificationManager = require('./notifications');
 const DockManager = require('./dock');
-const WindowManager = require('./window-state');
-const TrayManager = require('./tray');
+const { createWindowRegistry } = require('./windows');
+const { PARTITION, setupSecurity } = require('./window-security');
 const { baseUrl } = require('./base-url');
-const { decide, lockedTitle, isPermissionAllowed } = require('./links');
+const { isPermissionAllowed } = require('./links');
 
 // Constants
-const PARTITION = 'persist:hubspot';
 const GLOBAL_SHORTCUT = 'CommandOrControl+Shift+H';
 
 // Managers
-let windowManager;
+let registry;
 let notificationManager;
 let dockManager;
 let trayManager;
@@ -24,6 +23,10 @@ if (!app.isPackaged && process.env.HUBSPOT_DESKTOP_USER_DATA) {
   app.setPath('userData', process.env.HUBSPOT_DESKTOP_USER_DATA);
 }
 
+// Quiet mode for local test runs: no shown window, no focus, no dock icon, menu bar, tray or global shortcut.
+const QUIET = !app.isPackaged && process.env.HUBSPOT_DESKTOP_QUIET === '1';
+if (QUIET && process.platform === 'darwin') app.setActivationPolicy('accessory');
+
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
 
@@ -31,7 +34,7 @@ if (!gotTheLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    windowManager?.focusOrCreate();
+    registry?.show();
   });
 }
 
@@ -42,37 +45,43 @@ app.whenReady().then(async () => {
   setupPermissions(ses);
   setupUserAgent(ses);
 
-  // Create window
-  windowManager = new WindowManager(PARTITION);
-  const mainWindow = windowManager.createMainWindow();
-
-  // Initialize managers
-  notificationManager = new NotificationManager(mainWindow);
-  dockManager = new DockManager(mainWindow);
-  const openRoute = createRouteOpener(mainWindow, () => windowManager.focusOrCreate());
-  trayManager = new TrayManager(mainWindow, windowManager, openRoute);
-
-  // Create menu
-  createMenu(mainWindow, openRoute);
-
-  // Setup security handlers
-  setupSecurity(mainWindow.webContents);
-
-  // Register global shortcut (Cmd+Shift+H to show/hide)
-  globalShortcut.register(GLOBAL_SHORTCUT, () => {
-    if (mainWindow.isVisible() && mainWindow.isFocused()) {
-      mainWindow.hide();
-    } else {
-      windowManager.focusOrCreate();
-    }
+  registry = createWindowRegistry({
+    partition: PARTITION,
+    preloadPath: path.join(__dirname, '../preload/preload.js'),
+    base: baseUrl(),
+    secure: (contents) => setupSecurity(contents, { quiet: QUIET }),
+    quiet: QUIET,
   });
+  const routes = createRouteOpener(registry);
+  const newTab = () => registry.open({ url: routes.url('dashboards') });
+  const newWindow = () => registry.open({ url: routes.url('dashboards'), tab: false });
+  registry.onWindow((win) => win.on('new-window-for-tab', newTab));
 
-  // Load HubSpot
-  mainWindow.loadURL(baseUrl());
+  notificationManager = new NotificationManager(registry, { quiet: QUIET });
+  dockManager = new DockManager();
+  createMenu({ registry, openRoute: routes.open, newTab, newWindow });
+
+  if (!QUIET) {
+    // Required here only, so a quiet run never loads the tray module.
+    const TrayManager = require('./tray');
+    trayManager = new TrayManager(registry, routes.open);
+
+    // Register global shortcut (Cmd+Shift+H to show/hide)
+    globalShortcut.register(GLOBAL_SHORTCUT, () => {
+      const win = registry.active();
+      if (win?.isVisible() && win.isFocused()) {
+        win.hide();
+      } else {
+        registry.show();
+      }
+    });
+  }
+
+  registry.open();
 
   // Handle macOS dock click
   app.on('activate', () => {
-    windowManager.focusOrCreate();
+    registry.show();
   });
 });
 
@@ -102,52 +111,4 @@ function setupPermissions(ses) {
 function setupUserAgent(ses) {
   const chromeVersion = process.versions.chrome;
   ses.setUserAgent(`Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`);
-}
-
-const CHILD_WINDOW_OPTIONS = {
-  webPreferences: {
-    partition: PARTITION,
-    preload: path.join(__dirname, '../preload/preload.js'),
-    contextIsolation: true,
-    nodeIntegration: false,
-    sandbox: true,
-  },
-};
-
-// The title depends only on the URL the window has committed, read at each call.
-// A navigation that never commits changes nothing. Returns the locked title or null.
-function applyTitle(win, contents) {
-  const title = lockedTitle(contents.getURL(), { base: baseUrl() });
-  if (title !== null) win?.setTitle(title);
-  return title;
-}
-
-function setupSecurity(contents) {
-  const base = baseUrl();
-  const win = BrowserWindow.fromWebContents(contents);
-
-  const guardNavigation = (event) => {
-    if (!event.isMainFrame) return;
-    const { url } = event;
-    const action = decide({ url, currentUrl: contents.getURL(), kind: 'navigate', base });
-    if (action === 'allow') return;
-    event.preventDefault();
-    if (action === 'external') shell.openExternal(url);
-  };
-  contents.on('will-navigate', guardNavigation);
-  contents.on('will-redirect', guardNavigation);
-
-  for (const name of ['did-navigate', 'did-fail-load', 'did-finish-load']) contents.on(name, () => applyTitle(win, contents));
-  win?.on('page-title-updated', (event) => {
-    if (applyTitle(win, contents) !== null) event.preventDefault();
-  });
-
-  contents.setWindowOpenHandler(({ url }) => {
-    const action = decide({ url, currentUrl: contents.getURL(), kind: 'open', base });
-    if (action === 'allow') return { action: 'allow', overrideBrowserWindowOptions: CHILD_WINDOW_OPTIONS };
-    if (action === 'external') shell.openExternal(url);
-    return { action: 'deny' };
-  });
-
-  contents.on('did-create-window', (child) => setupSecurity(child.webContents));
 }
