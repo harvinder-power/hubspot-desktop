@@ -9,11 +9,10 @@ function createRouteOpener(registry) {
   const base = baseUrl();
   const portal = portalTracker({ base });
   // did-navigate fires for the main frame only; did-navigate-in-page fires for every frame.
-  // A sign-in page in a window that a page opened does not clear the portal (see portalTracker).
-  registry.onWindow(({ webContents }, { pageOpened }) => {
-    webContents.on('did-navigate', (event, url) => portal.observe(url, { pageOpened }));
+  registry.onWindow(({ webContents }) => {
+    webContents.on('did-navigate', (event, url) => portal.observe(url));
     webContents.on('did-navigate-in-page', (event, url, isMainFrame) => {
-      if (isMainFrame) portal.observe(url, { pageOpened });
+      if (isMainFrame) portal.observe(url);
     });
   });
   const url = (routeId) => resolve(routeId, portal.context, { base });

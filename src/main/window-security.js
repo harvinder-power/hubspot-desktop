@@ -21,28 +21,23 @@ const CHILD_WINDOW_OPTIONS = {
   'outside-popup': { show: false, webPreferences: CHILD_WEB_PREFERENCES },
 };
 
-// Closes the page only when the document is provably empty. The check and the close run in one
-// renderer task, so nothing the app writes can land between them. Any error keeps the window open.
-const CLOSE_IF_EMPTY = "document.body?.childElementCount === 0 && document.body.textContent.trim() === '' && (window.close(), true)";
+// True only when the document is provably empty. Any error keeps the window open.
+const IS_EMPTY_DOCUMENT = "document.body?.childElementCount === 0 && document.body.textContent.trim() === ''";
 
-const isBlankUrl = (url) => url === '' || url === 'about:blank';
-
-// The title depends only on what the window has committed, read at each call.
+// The title depends only on the URL the window has committed, read at each call.
 // A navigation that never commits changes nothing. Returns the locked title or null.
-function applyTitle(win, contents, appOpenedBlank) {
-  const activeIndex = contents.navigationHistory.getActiveIndex();
-  const title = lockedTitle(contents.getURL(), { base: baseUrl(), activeIndex, appOpenedBlank });
+function applyTitle(win, contents, outsidePopup) {
+  const history = contents.navigationHistory;
+  const index = history.getActiveIndex();
+  const previousUrl = index > 0 ? history.getEntryAtIndex(index - 1)?.url ?? '' : '';
+  const title = lockedTitle(contents.getURL(), { base: baseUrl(), previousUrl, outsidePopup });
   if (title !== null) win?.setTitle(title);
   return title;
 }
 
-// appOpenedBlank: the window is a blank child that an app page opened (only an app page may open one).
-// It stays true until the window commits any other page, so a blank page restored later is locked.
-function setupSecurity(contents, { appOpenedBlank = false } = {}) {
+function setupSecurity(contents, { outsidePopup = false } = {}) {
   const base = baseUrl();
   const win = BrowserWindow.fromWebContents(contents);
-  let ownBlank = appOpenedBlank;
-  const title = () => applyTitle(win, contents, ownBlank);
 
   const guardNavigation = (event) => {
     if (!event.isMainFrame) return;
@@ -55,19 +50,17 @@ function setupSecurity(contents, { appOpenedBlank = false } = {}) {
     shell.openExternal(url);
     // A blank popup the app sends outside before writing into it has nothing else to show, so it closes.
     if (pageKind(currentUrl, { base }) !== 'blank' || contents.navigationHistory.length() !== 1) return;
-    contents.executeJavaScript(CLOSE_IF_EMPTY).catch(() => {});
+    contents
+      .executeJavaScript(IS_EMPTY_DOCUMENT)
+      .then((empty) => empty === true && win?.close())
+      .catch(() => {});
   };
   contents.on('will-navigate', guardNavigation);
   contents.on('will-redirect', guardNavigation);
 
-  for (const name of ['did-navigate', 'did-fail-load', 'did-finish-load']) {
-    contents.on(name, () => {
-      if (!isBlankUrl(contents.getURL())) ownBlank = false;
-      title();
-    });
-  }
+  for (const name of ['did-navigate', 'did-fail-load', 'did-finish-load']) contents.on(name, () => applyTitle(win, contents, outsidePopup));
   win?.on('page-title-updated', (event) => {
-    if (title() !== null) event.preventDefault();
+    if (applyTitle(win, contents, outsidePopup) !== null) event.preventDefault();
   });
 
   contents.setWindowOpenHandler(({ url }) => {
@@ -77,7 +70,9 @@ function setupSecurity(contents, { appOpenedBlank = false } = {}) {
     return { action: 'deny' };
   });
 
-  contents.on('did-create-window', (child, { url }) => setupSecurity(child.webContents, { appOpenedBlank: isBlankUrl(url) }));
+  contents.on('did-create-window', (child, { url }) =>
+    setupSecurity(child.webContents, { outsidePopup: childWindowKind(url, { base }) === 'outside-popup' })
+  );
 }
 
 module.exports = { PARTITION, setupSecurity };
