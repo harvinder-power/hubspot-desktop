@@ -1,6 +1,7 @@
-const { app, Menu, shell } = require('electron');
+const { app, clipboard, Menu, shell } = require('electron');
 const { baseUrl } = require('./base-url');
 const { ROUTES, resolve, portalTracker } = require('./routes');
+const { pageLink } = require('./context-menu');
 
 // One portal tracker fed by the main frame of every registry window.
 // url(id) is the route for the last portal seen. open(id) loads it in the active window.
@@ -24,6 +25,12 @@ function createRouteOpener(registry) {
 function createMenu({ registry, openRoute, newTab, newWindow }) {
   const isMac = process.platform === 'darwin';
   const history = () => registry.active()?.webContents.navigationHistory;
+  const base = baseUrl();
+  // Runs `use` on the active page's URL only when that page is an app page.
+  const withPageLink = (use) => {
+    const url = pageLink(registry.active()?.webContents.getURL(), base);
+    if (url) use(url);
+  };
 
   const template = [
     // App Menu (Mac only)
@@ -48,6 +55,10 @@ function createMenu({ registry, openRoute, newTab, newWindow }) {
       submenu: [
         { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => newTab() },
         { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => newWindow() },
+        { type: 'separator' },
+        { label: 'Copy Page Link', accelerator: 'CmdOrCtrl+Shift+C', click: () => withPageLink((url) => clipboard.writeText(url)) },
+        // An app page URL is always http: or https:, so only those reach shell.openExternal.
+        { label: 'Open Page in Browser', accelerator: 'CmdOrCtrl+Shift+O', click: () => withPageLink((url) => shell.openExternal(url)) },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' }
       ]
