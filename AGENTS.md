@@ -38,9 +38,9 @@
   - `gh run view <run-id> --log-failed` prints the failing steps of every job.
   - The failed job uploads `test-results/` as the artifact `playwright-results-<os>`.
   - `gh run download <run-id> -n playwright-results-<os>` fetches it. Each failure has an `error-context.md`.
-- CI keeps one retry for two known Linux flakes. Both pass on retry:
-  - `app.spec.js:88`: the first screenshot after launch fails with `Unable to capture screenshot`.
-  - `windows.spec.js:190`: OS focus does not move, because xvfb runs no window manager.
+- CI keeps one retry for two known flakes. Both pass on retry:
+  - `app.spec.js:88`, Linux only: the first screenshot after launch fails with `Unable to capture screenshot`.
+  - `windows.spec.js:190`, Linux and Windows: the focus poll times out, so OS focus did not move in time.
 - Do not guess a fix from a test name. Read the failing log line first.
 - A test that fails because the app is wrong on one OS gets `test.fixme(process.platform === '<os>', '<reason>')` and an issue.
 
