@@ -63,7 +63,7 @@ app.whenReady().then(async () => {
 
   notificationManager = new NotificationManager(registry, { quiet: QUIET });
   dockManager = new DockManager();
-  createMenu({ registry, openRoute: routes.open, newTab, newWindow });
+  createMenu({ registry, openRoute: routes.open, newTab, newWindow, find: require('./find').createFind(registry) });
 
   if (!QUIET) {
     // Required here only, so a quiet run never loads the tray module.
