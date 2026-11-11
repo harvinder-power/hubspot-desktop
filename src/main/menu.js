@@ -2,6 +2,7 @@ const { app, BrowserWindow, clipboard, Menu, shell } = require('electron');
 const { baseUrl } = require('./base-url');
 const { ROUTES, resolve, portalTracker } = require('./routes');
 const { pageLink } = require('./context-menu');
+const { FIND_MENU_ITEMS } = require('./find');
 
 // One portal tracker fed by the main frame of every registry window.
 // url(id) is the route for the last portal seen. open(id) loads it in the active window.
@@ -22,7 +23,7 @@ function createRouteOpener(registry) {
   };
 }
 
-function createMenu({ registry, openRoute, newTab, newWindow }) {
+function createMenu({ registry, openRoute, newTab, newWindow, find }) {
   const isMac = process.platform === 'darwin';
   const history = () => registry.active()?.webContents.navigationHistory;
   const base = baseUrl();
@@ -77,7 +78,9 @@ function createMenu({ registry, openRoute, newTab, newWindow }) {
         { role: 'paste' },
         { role: 'pasteAndMatchStyle' },
         { role: 'delete' },
-        { role: 'selectAll' }
+        { role: 'selectAll' },
+        { type: 'separator' },
+        ...FIND_MENU_ITEMS.map(({ label, accelerator, command }) => ({ label, accelerator, click: () => find[command]() }))
       ]
     },
 

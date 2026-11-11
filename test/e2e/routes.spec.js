@@ -135,11 +135,11 @@ test('the tray menu lists the routes in table order', async () => {
 });
 
 const BANNED_ACCELERATORS = [
-  'CmdOrCtrl+K', 'CmdOrCtrl+I', 'CmdOrCtrl+F', 'CmdOrCtrl+D', 'Cmd+,',
+  'CmdOrCtrl+K', 'CmdOrCtrl+I', 'CmdOrCtrl+D', 'Cmd+,',
   'CmdOrCtrl+Shift+N', 'CmdOrCtrl+Shift+T', 'CmdOrCtrl+,',
 ];
 const BANNED_LABELS = [
-  'New Contact', 'New Company', 'New Deal', 'New Task', 'New Ticket', 'Find...', 'Preferences...',
+  'New Contact', 'New Company', 'New Deal', 'New Task', 'New Ticket', 'Preferences...',
   'Quick Actions', 'Go To',
 ];
 

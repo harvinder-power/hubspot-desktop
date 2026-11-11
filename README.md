@@ -22,6 +22,9 @@ A native Mac desktop app for HubSpot. No more browser tabs — access HubSpot di
 | `Cmd+N` | New Window |
 | `Cmd+Shift+C` | Copy Page Link |
 | `Cmd+Shift+O` | Open Page in Browser |
+| `Cmd+F` | Find in Page |
+| `Cmd+G` | Find Next |
+| `Cmd+Shift+G` | Find Previous |
 | `Cmd+1` | Dashboards |
 | `Cmd+2` | Contacts |
 | `Cmd+3` | Companies |

@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'">
+<title>Find</title>
+<link rel="stylesheet" href="find.css">
+</head>
+<body>
+<form id="bar" role="search" autocomplete="off">
+  <input id="query" type="text" placeholder="Find" aria-label="Find in page" spellcheck="false" autofocus>
+  <span id="count" aria-live="polite"></span>
+  <button id="previous" type="button" aria-label="Previous match" title="Previous (Shift+Cmd+G)">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 10l4-4 4 4"/></svg>
+  </button>
+  <button id="next" type="button" aria-label="Next match" title="Next (Cmd+G)">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
+  </button>
+  <button id="close" type="button" aria-label="Close find bar" title="Close (Esc)">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>
+  </button>
+</form>
+<script src="bar.js"></script>
+</body>
+</html>
