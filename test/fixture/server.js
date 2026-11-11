@@ -23,6 +23,7 @@ function hubPage(path, portalId) {
   <li><a id="contact-link" href="${links.contact}">Contact record</a></li>
   <li><a id="deal-link" href="${links.deal}">Deal record</a></li>
   <li><a id="external-link" href="https://example.com">External site</a></li>
+  <li><a id="http-external-link" href="http://example.com/x">External site over http</a></li>
   <li><a id="blank-link" href="${links.list}" target="_blank">Contacts list in new window</a></li>
   <li><a id="editor-link" href="/editor">Editor</a></li>
 </ul>

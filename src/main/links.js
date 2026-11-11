@@ -5,7 +5,7 @@ const { DEFAULT_BASE_URL } = require('./base-url');
 const REGION_HOST = /^app-[a-z]{2}[0-9]+\.hubspot\.com$/;
 // Unverified: nobody has yet checked these against HubSpot's real sign-in pages.
 const SIGN_IN_PATHS = ['/login', '/sso'];
-// Allowlist. No other scheme ever reaches shell.openExternal.
+// Allowlist. With http: and https:, no other scheme ever reaches shell.openExternal.
 const EXTERNAL_SCHEMES = ['mailto:', 'tel:', 'sms:', 'callto:'];
 const APP_PERMISSIONS = ['notifications', 'media', 'clipboard-read', 'clipboard-sanitized-write'];
 
@@ -102,6 +102,14 @@ const RULES = [
     action: ({ target, base }) => (isAppOrigin(target.origin, { base }) ? 'allow' : 'deny'),
   },
   { name: 'external-scheme', test: ({ target }) => EXTERNAL_SCHEMES.includes(target.protocol), action: 'external' },
+  // An http: link never loads in a window. From an app page (or the blank popup it writes) it opens in the browser.
+  // During sign-in it stays refused, so a provider cannot downgrade the flow or hand a sign-in URL to plain http.
+  {
+    name: 'http-from-app',
+    test: ({ target, page, base }) =>
+      target.protocol === 'http:' && (page === 'app' || page === 'blank') && !isPermittedScheme(target, base),
+    action: 'external',
+  },
   { name: 'unsafe-scheme', test: ({ target, base }) => !isPermittedScheme(target, base), action: 'deny' },
   { name: 'app-origin', test: ({ target, base }) => isAppOrigin(target.href, { base }), action: 'allow' },
   {
