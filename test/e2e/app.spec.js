@@ -374,6 +374,24 @@ for (const blank of ['', 'about:blank']) {
   });
 }
 
+test('a blank popup the app wrote into stays open when one of its links goes outside', async () => {
+  await startAt(window, dashboardUrl());
+  const [popup] = await Promise.all([
+    app.waitForEvent('window'),
+    window.evaluate(() => {
+      const child = window.open('');
+      child.document.write('<h1>Report</h1><a id="out" href="https://example.com/">Source</a>');
+      child.document.close();
+    }),
+  ]);
+  await popup.evaluate(() => document.querySelector('#out').click());
+  await expect.poll(openedExternally).toEqual(['https://example.com/']);
+  await popup.waitForTimeout(1000);
+  expect(await windowCount()).toBe(2);
+  expect(await popup.evaluate(() => document.querySelector('h1').textContent)).toBe('Report');
+  await popup.close();
+});
+
 test('a blank popup the app writes keeps its own title', async () => {
   await startAt(window, dashboardUrl());
   const [popup] = await Promise.all([

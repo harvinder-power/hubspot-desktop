@@ -1,11 +1,15 @@
 const { app, BrowserWindow } = require('electron');
 const windowStateKeeper = require('electron-window-state');
-const { pageKind } = require('./links');
+const { pageKind, childWindowKind } = require('./links');
 
 // Windows with the same identifier join one native tab group on macOS.
 const TABBING_IDENTIFIER = 'hubspot-desktop';
 
-// The app windows. The set is the only state, kept in focus order: the last entry was focused last.
+// Two kinds of window, fixed at creation (see childWindowKind):
+// - app window: opened by open(), or by a page for an app or blank URL. It is in the set and may be tabbed.
+// - outside popup: opened by a page for any other URL. It is not in the set, is never tabbed, never
+//   hosts a tab, is never active() and closes for real.
+// The set is the only state, kept in focus order: the last entry was focused last.
 // quiet: windows are never shown or focused, so a local test run cannot take focus.
 function createWindowRegistry({ partition, preloadPath, base, secure, quiet = false }) {
   const windows = new Set();
@@ -22,12 +26,14 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
     return [...windows].at(-1) ?? null;
   }
 
+  const onAppPage = (win) => !win.isDestroyed() && pageKind(win.webContents.getURL(), { base }) === 'app';
+
   // tab: false opens a separate window. Off macOS every window is separate.
   function open({ url, tab = true } = {}) {
     const current = isMac ? active() : null;
     // The last window hides instead of closing. Show it again, so it does not come back later as a surprise.
     if (current && !current.isVisible() && !quiet) current.show();
-    const host = tab ? current : null;
+    const host = () => (tab && current && onAppPage(current) ? current : null);
     // Window bounds persist for the first window only.
     const state = windows.size === 0 ? windowStateKeeper({ defaultWidth: 1400, defaultHeight: 900, file: 'window-state.json' }) : null;
     const win = new BrowserWindow({
@@ -50,21 +56,41 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
     });
     state?.manage(win);
     secure(win.webContents);
-    track(win, { host: () => host, state });
+    track(win, { host, state });
     win.loadURL(url ?? base);
     return win;
   }
 
-  // A window that a page opened (window.open or target=_blank), already secured by its opener.
-  // An outside page is never tabbed: a third-party page must not sit in the tab bar like an app tab.
+  // Children of any window, already secured by their opener. The kind comes from the requested URL,
+  // with the same function that chose the child's window options.
+  function watchChildren(win) {
+    win.webContents.on('did-create-window', (child, { url }) => {
+      if (childWindowKind(url, { base }) === 'app') adopt(child, { opener: win });
+      else popup(child);
+    });
+  }
+
+  // An app child is tabbed with its opener only when both are on app pages.
   function adopt(win, { opener }) {
-    const host = () => (isMac && pageKind(win.webContents.getURL(), { base }) !== 'outside' ? opener : null);
+    const host = () => (isMac && onAppPage(win) && onAppPage(opener) ? opener : null);
     track(win, { host });
+  }
+
+  function popup(win) {
+    watchChildren(win);
+    win.once('ready-to-show', () => {
+      if (!quiet && !win.isDestroyed()) win.show();
+    });
   }
 
   // host() is read at ready-to-show, when the window has committed its first page.
   function track(win, { host, state = null }) {
     windows.add(win);
+    // Invariant: a window on an outside page is not in a tab group. did-navigate also fires for Back and Forward.
+    // Once out, the window stays separate. Quiet windows are never tabbed.
+    win.webContents.on('did-navigate', (event, url) => {
+      if (isMac && !quiet && pageKind(url, { base }) === 'outside') win.moveTabToNewWindow();
+    });
     let closedEarly = false;
     win.on('focus', () => {
       windows.delete(win);
@@ -88,7 +114,7 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
       win.show();
       if (state?.isMaximized) win.maximize();
     });
-    win.webContents.on('did-create-window', (child) => adopt(child, { opener: win }));
+    watchChildren(win);
     for (const listener of listeners) listener(win);
   }
 

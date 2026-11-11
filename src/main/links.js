@@ -43,12 +43,23 @@ function pageKind(committedUrl, { base = DEFAULT_BASE_URL } = {}) {
   return signIn ? 'app-sign-in' : 'app';
 }
 
+// The kind of a window a page opens, fixed from the URL it requests: 'app' for an app URL or a blank
+// page (which only an app page may open), else 'outside-popup'. Only an app window may join the tab group.
+function childWindowKind(requestedUrl, { base = DEFAULT_BASE_URL } = {}) {
+  const blank = requestedUrl === '' || requestedUrl === 'about:blank';
+  return blank || isAppOrigin(requestedUrl, { base }) ? 'app' : 'outside-popup';
+}
+
 const isWebUrl = (url) => ['http:', 'https:'].includes(parse(url)?.protocol);
 
 // The window title for an outside page, host first. Null means the page owns its title,
 // so a blank child that the app fills in keeps the title the app gives it.
-function lockedTitle(committedUrl, { base = DEFAULT_BASE_URL } = {}) {
-  if (pageKind(committedUrl, { base }) !== 'outside') return null;
+// An outside page can commit about:blank itself, so a blank page stays locked in an outside popup
+// or after an outside page (`previousUrl`, the history entry before it).
+function lockedTitle(committedUrl, { base = DEFAULT_BASE_URL, previousUrl = '', outsidePopup = false } = {}) {
+  const kind = pageKind(committedUrl, { base });
+  const blankAfterOutside = kind === 'blank' && (outsidePopup || pageKind(previousUrl, { base }) === 'outside');
+  if (kind !== 'outside' && !blankAfterOutside) return null;
   const url = parse(committedUrl);
   return `${url?.hostname || url?.protocol || 'unknown'} (external page)`;
 }
@@ -104,4 +115,4 @@ function isPermissionAllowed(permission, origin, { base = DEFAULT_BASE_URL } = {
   return APP_PERMISSIONS.includes(permission) && isAppOrigin(origin, { base });
 }
 
-module.exports = { SIGN_IN_PATHS, isAppOrigin, pageKind, lockedTitle, decide, isPermissionAllowed, RULES };
+module.exports = { SIGN_IN_PATHS, isAppOrigin, pageKind, childWindowKind, lockedTitle, decide, isPermissionAllowed, RULES };

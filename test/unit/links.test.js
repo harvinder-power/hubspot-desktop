@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { isAppOrigin, pageKind, lockedTitle, decide, isPermissionAllowed, RULES, SIGN_IN_PATHS } = require('../../src/main/links');
+const { isAppOrigin, pageKind, childWindowKind, lockedTitle, decide, isPermissionAllowed, RULES, SIGN_IN_PATHS } = require('../../src/main/links');
 
 const RECORD = 'https://app.hubspot.com/contacts/4242/record/0-1/101';
 const LOGIN = 'https://app.hubspot.com/login';
@@ -72,16 +72,42 @@ test('pageKind names the committed page', () => {
   assert.equal(pageKind('http://127.0.0.1:4322/idp', { base: OVERRIDE }), 'outside');
 });
 
+test('childWindowKind makes app and blank children app windows and every other child an outside popup', () => {
+  const cases = [
+    [RECORD, 'app'],
+    [LOGIN, 'app'],
+    ['', 'app'],
+    ['about:blank', 'app'],
+    [OKTA, 'outside-popup'],
+    ['https://app.hubspot.com.evil.example/', 'outside-popup'],
+    ['https://user@app.hubspot.com/', 'outside-popup'],
+    ['about:srcdoc', 'outside-popup'],
+    ['not a url', 'outside-popup'],
+  ];
+  for (const [url, kind] of cases) assert.equal(childWindowKind(url), kind, url);
+  assert.equal(childWindowKind(`${OVERRIDE}/login`, { base: OVERRIDE }), 'app');
+  assert.equal(childWindowKind('http://127.0.0.1:4322/idp/authorize', { base: OVERRIDE }), 'outside-popup');
+});
+
 test('lockedTitle is null for app pages and the empty page, and names the host otherwise', () => {
   assert.equal(lockedTitle(RECORD), null);
   assert.equal(lockedTitle(LOGIN), null);
   assert.equal(lockedTitle(''), null);
   assert.equal(lockedTitle('https://idp.example/authorize?x=1'), 'idp.example (external page)');
-  assert.equal(lockedTitle('https://аpple.com/'), 'xn--pple-43d.com (external page)');
+  assert.equal(lockedTitle(`https://${String.fromCodePoint(0x430)}pple.com/`), 'xn--pple-43d.com (external page)');
   assert.equal(lockedTitle('about:blank'), null);
   assert.equal(lockedTitle('about:srcdoc'), 'about: (external page)');
   assert.equal(lockedTitle('https://app.hubspot.com.evil.example/'), 'app.hubspot.com.evil.example (external page)');
   assert.equal(lockedTitle('http://127.0.0.1:4322/idp', { base: OVERRIDE }), '127.0.0.1 (external page)');
+});
+
+test('lockedTitle locks a blank page in an outside popup or after an outside page only', () => {
+  assert.equal(lockedTitle('about:blank', { outsidePopup: true }), 'about: (external page)');
+  assert.equal(lockedTitle('about:blank', { previousUrl: OKTA }), 'about: (external page)');
+  assert.equal(lockedTitle('about:blank', { previousUrl: RECORD }), null);
+  assert.equal(lockedTitle('about:blank', { previousUrl: LOGIN }), null);
+  assert.equal(lockedTitle('about:blank', { previousUrl: '' }), null);
+  assert.equal(lockedTitle(RECORD, { outsidePopup: true, previousUrl: OKTA }), null);
 });
 
 test('the rules table keeps its order', () => {

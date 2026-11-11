@@ -38,6 +38,7 @@ const windowInfo = () =>
       .sort((a, b) => a.id - b.id)
       .map((w) => ({
         url: w.webContents.getURL(),
+        title: w.getTitle(),
         tabbingIdentifier: w.tabbingIdentifier,
         bounds: w.getBounds(),
         visible: w.isVisible(),
@@ -91,6 +92,39 @@ async function signInPopup() {
   const [popup] = await Promise.all([app.waitForEvent('window'), first.evaluate((url) => { window.open(url); }, idpUrl)]);
   await popup.waitForURL(idpUrl);
   return popup;
+}
+
+const idpUrl = () => `${idp.url}/idp/authorize`;
+const LOCKED_TITLE = '127.0.0.1 (external page)';
+
+// The registry asks BrowserWindow.getFocusedWindow() for the focused window, so this stands in for OS focus.
+const pretendFocused = (index) =>
+  app.evaluate(({ BrowserWindow }, i) => {
+    const win = BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[i];
+    BrowserWindow.getFocusedWindow = () => win;
+  }, index);
+
+// main.js listens for the native + button on registry windows only, so a window opens only for those.
+const plusOpensWindow = async (index) => {
+  const before = (await windowInfo()).length;
+  await app.evaluate(({ BrowserWindow }, i) => { BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[i].emit('new-window-for-tab'); }, index);
+  await first.waitForTimeout(500);
+  return (await windowInfo()).length > before;
+};
+
+// A target=_blank child of the first window, opened to the app sign-in page.
+async function signInChild() {
+  const loginUrl = `${fixture.url}/login`;
+  const [child] = await Promise.all([
+    app.waitForEvent('window'),
+    first.evaluate((url) => {
+      const link = Object.assign(document.createElement('a'), { href: url, target: '_blank' });
+      document.body.append(link);
+      link.click();
+    }, loginUrl),
+  ]);
+  await child.waitForURL(loginUrl);
+  return child;
 }
 
 test.beforeAll(async () => {
@@ -184,7 +218,101 @@ test.describe('native tab groups (CI only)', () => {
     await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true]);
     await expect.poll(onScreen).toEqual([true, true]);
   });
+
+  test('New Tab with a sign-in popup focused joins the app window, not the popup', async () => {
+    await signInPopup();
+    await startAt(app, first, dashboardUrl());
+    await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true]);
+    await pretendFocused(1);
+    await newTab();
+    await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true, true]);
+    // The app window and the new tab share a group with the tab in front. The popup stays on screen.
+    await expect.poll(onScreen).toEqual([false, true, true]);
+  });
+
+  test('a tabbed child that navigates to an outside page leaves the tab group', async () => {
+    const child = await blankLinkChild();
+    await expect.poll(onScreen).toEqual([false, true]);
+    await child.goto(`${fixture.url}/login`);
+    await child.evaluate(() => document.querySelector('#idp-link').click());
+    await child.waitForURL(/\/idp\/authorize/);
+    await expect.poll(onScreen).toEqual([true, true]);
+  });
+
+  test('Back to an outside history entry in a tabbed window leaves the tab group', async () => {
+    await startAt(app, first, `${fixture.url}/login`);
+    await first.evaluate(() => document.querySelector('#idp-link').click());
+    await first.waitForURL(/\/idp\/authorize/);
+    await first.evaluate(() => document.querySelector('#return-link').click());
+    await first.waitForURL(dashboardUrl());
+    await newTab();
+    await expect.poll(onScreen).toEqual([false, true]);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[0].webContents.navigationHistory.goBack());
+    await first.waitForURL(/\/idp\/authorize/);
+    await expect.poll(onScreen).toEqual([true, true]);
+  });
 });
+
+test('a sign-in popup is not a registry window: no tab identifier, no + button, locked title', async () => {
+  await signInPopup();
+  const [, popup] = await windowInfo();
+  expect(popup).toMatchObject({ url: idpUrl(), title: LOCKED_TITLE });
+  if (isMac) expect(popup.tabbingIdentifier || null).toBeNull();
+  expect(await plusOpensWindow(1)).toBe(false);
+  expect(await plusOpensWindow(0)).toBe(true);
+});
+
+test('with a sign-in popup focused, New Tab and a route open in app windows and the popup keeps its page', async () => {
+  await signInPopup();
+  await pretendFocused(1);
+  // /login cleared the portal, so Deals opens the app root, which goes to the dashboard.
+  await clickMenu('Navigate', 'Deals');
+  await first.waitForURL(dashboardUrl());
+  await newTab();
+  expect((await windowInfo()).map((w) => w.url)).toEqual([dashboardUrl(), idpUrl(), dashboardUrl()]);
+});
+
+test('closing the app window and then the sign-in popup destroys the popup, and activate shows the app window', async () => {
+  test.skip(!isMac, 'the last window hides on macOS only');
+  await signInPopup();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[0].close());
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[1].close());
+  await expect.poll(async () => (await windowInfo()).map((w) => w.url)).toEqual([`${fixture.url}/login`]);
+  await app.evaluate(({ app: electronApp }) => electronApp.emit('activate'));
+  await expect.poll(async () => (await windowInfo()).map(({ url, visible }) => ({ url, visible }))).toEqual([
+    { url: `${fixture.url}/login`, visible: !quiet },
+  ]);
+});
+
+test('a target=_blank child on /login that goes to the identity provider stays a registry window with a locked title', async () => {
+  const child = await signInChild();
+  await child.evaluate(() => document.querySelector('#idp-link').click());
+  await child.waitForURL(/\/idp\/authorize/);
+  await expect.poll(async () => (await windowInfo())[1].title).toBe(LOCKED_TITLE);
+  expect(await plusOpensWindow(1)).toBe(true);
+});
+
+// Observed: will-navigate does not fire for about:blank, so the provider page can commit it.
+// The title stays locked on that blank page, in an outside popup and in an app window.
+for (const where of ['outside popup', 'app window']) {
+  test(`an outside page that commits about:blank keeps a locked title (${where})`, async () => {
+    let page;
+    if (where === 'outside popup') {
+      page = await signInPopup();
+    } else {
+      page = first;
+      await startAt(app, first, `${fixture.url}/login`);
+      await first.evaluate(() => document.querySelector('#idp-link').click());
+      await first.waitForURL(/\/idp\/authorize/);
+    }
+    const index = where === 'outside popup' ? 1 : 0;
+    await page.evaluate(() => { location.href = 'about:blank'; });
+    await expect.poll(async () => (await windowInfo())[index].url).toBe('about:blank');
+    await page.evaluate(() => { document.title = 'HubSpot'; });
+    await page.waitForTimeout(500);
+    expect((await windowInfo())[index].title).toBe('about: (external page)');
+  });
+}
 
 test('a window that page opened is a registry window: menus, the + button and the portal tracker cover it', async () => {
   const child = await blankLinkChild();

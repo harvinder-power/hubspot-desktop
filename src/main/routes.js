@@ -35,13 +35,15 @@ function resolve(routeId, context, { base = DEFAULT_BASE_URL } = {}) {
   return context.origin + route.path(context.portalId);
 }
 
-// The last portal context of the main frame. An app sign-in page clears it (signed out).
+// The last portal context of the main frame. An app sign-in page clears it (signed out), unless a page
+// opened that window: a link to /login in a new window does not sign out the other windows.
 // An outside page (mid sign-in) or an app page without a portal ID keeps the previous one.
 function portalTracker({ base = DEFAULT_BASE_URL } = {}) {
   let last = null;
   return {
-    observe(url) {
-      last = pageKind(url, { base }) === 'app-sign-in' ? null : portalContext(url, { base }) ?? last;
+    observe(url, { pageOpened = false } = {}) {
+      const signedOut = pageKind(url, { base }) === 'app-sign-in' && !pageOpened;
+      last = signedOut ? null : portalContext(url, { base }) ?? last;
     },
     get context() {
       return last;
