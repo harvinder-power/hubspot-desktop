@@ -50,16 +50,25 @@ function childWindowKind(requestedUrl, { base = DEFAULT_BASE_URL } = {}) {
   return blank || isAppOrigin(requestedUrl, { base }) ? 'app' : 'outside-popup';
 }
 
+// Page kinds a window may be tabbed on. A sign-in page counts: it is an app page the user signs in on.
+const TAB_PAGE_KINDS = ['app', 'app-sign-in'];
+
+// Whether a window may be in a native tab group, or host one, read from its committed state:
+// registry membership and the kind of the page it has committed. Every other window is separate.
+function tabEligible({ inRegistry, committedKind }) {
+  return inRegistry === true && TAB_PAGE_KINDS.includes(committedKind);
+}
+
 const isWebUrl = (url) => ['http:', 'https:'].includes(parse(url)?.protocol);
 
-// The window title for an outside page, host first. Null means the page owns its title,
-// so a blank child that the app fills in keeps the title the app gives it.
-// An outside page can commit about:blank itself, so a blank page stays locked in an outside popup
-// or after an outside page (`previousUrl`, the history entry before it).
-function lockedTitle(committedUrl, { base = DEFAULT_BASE_URL, previousUrl = '', outsidePopup = false } = {}) {
+// The window title for an outside page, host first. Null means the page owns its title.
+// A blank page owns its title only while it is the first document of a blank child the app opened
+// (`appOpenedBlank`, history entry 0), so the app can title a page it writes into.
+// Every other blank page is locked: an outside page can commit about:blank itself, also by location.replace.
+function lockedTitle(committedUrl, { base = DEFAULT_BASE_URL, activeIndex = 0, appOpenedBlank = false } = {}) {
   const kind = pageKind(committedUrl, { base });
-  const blankAfterOutside = kind === 'blank' && (outsidePopup || pageKind(previousUrl, { base }) === 'outside');
-  if (kind !== 'outside' && !blankAfterOutside) return null;
+  const ownBlank = kind === 'blank' && appOpenedBlank && activeIndex === 0;
+  if (kind !== 'outside' && (kind !== 'blank' || ownBlank)) return null;
   const url = parse(committedUrl);
   return `${url?.hostname || url?.protocol || 'unknown'} (external page)`;
 }
@@ -115,4 +124,4 @@ function isPermissionAllowed(permission, origin, { base = DEFAULT_BASE_URL } = {
   return APP_PERMISSIONS.includes(permission) && isAppOrigin(origin, { base });
 }
 
-module.exports = { SIGN_IN_PATHS, isAppOrigin, pageKind, childWindowKind, lockedTitle, decide, isPermissionAllowed, RULES };
+module.exports = { SIGN_IN_PATHS, isAppOrigin, pageKind, childWindowKind, tabEligible, lockedTitle, decide, isPermissionAllowed, RULES };
