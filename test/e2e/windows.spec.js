@@ -250,7 +250,9 @@ test('quiet mode shows no window or dock icon and creates no tray or global shor
     ]);
     await child.waitForURL(contactsUrl());
     const state = await electronApp.evaluate(({ app: electronApp, BrowserWindow, globalShortcut }) => {
-      const loaded = (name) => Object.keys(process.mainModule.constructor._cache).some((file) => file.endsWith(`/src/main/${name}`));
+      // Windows module paths use backslashes.
+      const loaded = (name) => Object.keys(process.mainModule.constructor._cache)
+        .some((file) => file.replaceAll('\\', '/').endsWith(`/src/main/${name}`));
       return {
         windows: BrowserWindow.getAllWindows().length,
         noneVisible: BrowserWindow.getAllWindows().every((w) => !w.isVisible()),

@@ -294,6 +294,8 @@ test('preload IPC works from the app origin only', async () => {
     ipcMain.on('show-notification', (event, { title }) => globalThis.ipcSeen.push(title));
     ipcMain.on('set-unread-count', (event, count) => globalThis.ipcSeen.push(count));
   });
+  // The unread count is shown as a dock badge, and app.dock exists on macOS only (src/main/dock.js).
+  const isMac = process.platform === 'darwin';
   const badge = () => app.evaluate(({ app: electronApp }) => electronApp.dock.getBadge());
   const send = (page, title, count) =>
     page.evaluate(([t, c]) => {
@@ -302,19 +304,21 @@ test('preload IPC works from the app origin only', async () => {
     }, [title, count]);
 
   await signInToProvider();
-  expect(await badge()).toBe('');
+  if (isMac) expect(await badge()).toBe('');
   await send(window, 'from-provider', 5);
   await expect.poll(() => app.evaluate(() => globalThis.ipcSeen)).toEqual(expect.arrayContaining(['from-provider', 5]));
   expect(await app.evaluate(() => globalThis.notificationsShown)).toEqual([]);
-  expect(await badge()).toBe('');
+  if (isMac) expect(await badge()).toBe('');
 
   await clickLink(window, '#return-link');
   await window.waitForURL(dashboardUrl());
   await send(window, 'from-app', 7);
   await expect.poll(() => app.evaluate(() => globalThis.notificationsShown)).toEqual(['from-app']);
-  await expect.poll(badge).toBe('7');
-  await window.evaluate(() => window.electronAPI.setUnreadCount(0));
-  await expect.poll(badge).toBe('');
+  if (isMac) {
+    await expect.poll(badge).toBe('7');
+    await window.evaluate(() => window.electronAPI.setUnreadCount(0));
+    await expect.poll(badge).toBe('');
+  }
 });
 
 test('a sign-in popup opens a second app window with the locked title', async () => {
