@@ -89,7 +89,7 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
     // Invariant: a window on an outside page is not in a tab group. did-navigate also fires for Back and Forward.
     // Once out, the window stays separate. Quiet windows are never tabbed.
     win.webContents.on('did-navigate', (event, url) => {
-      if (isMac && !quiet && pageKind(url, { base }) === 'outside') void 0;
+      if (isMac && !quiet && pageKind(url, { base }) === 'outside') win.moveTabToNewWindow();
     });
     let closedEarly = false;
     win.on('focus', () => {
