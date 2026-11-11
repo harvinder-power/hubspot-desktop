@@ -283,46 +283,6 @@ test('a first load that redirects to a provider stays in the window', async () =
   }
 });
 
-test('preload IPC works from the app origin only', async () => {
-  // Recorders run after the app's own listeners, so a recorded message has already been handled.
-  await app.evaluate(({ ipcMain, Notification }) => {
-    globalThis.ipcSeen = [];
-    globalThis.notificationsShown = [];
-    // The OS notification service is replaced too: on Linux isSupported() is false without libnotify.
-    Notification.isSupported = () => true;
-    Notification.prototype.show = function show() {
-      globalThis.notificationsShown.push(this.title);
-    };
-    ipcMain.on('show-notification', (event, { title }) => globalThis.ipcSeen.push(title));
-    ipcMain.on('set-unread-count', (event, count) => globalThis.ipcSeen.push(count));
-  });
-  // The unread count is shown as a dock badge, and app.dock exists on macOS only (src/main/dock.js).
-  const isMac = process.platform === 'darwin';
-  const badge = () => app.evaluate(({ app: electronApp }) => electronApp.dock.getBadge());
-  const send = (page, title, count) =>
-    page.evaluate(([t, c]) => {
-      window.electronAPI.showNotification(t, 'y');
-      window.electronAPI.setUnreadCount(c);
-    }, [title, count]);
-
-  await signInToProvider();
-  if (isMac) expect(await badge()).toBe('');
-  await send(window, 'from-provider', 5);
-  await expect.poll(() => app.evaluate(() => globalThis.ipcSeen)).toEqual(expect.arrayContaining(['from-provider', 5]));
-  expect(await app.evaluate(() => globalThis.notificationsShown)).toEqual([]);
-  if (isMac) expect(await badge()).toBe('');
-
-  await clickLink(window, '#return-link');
-  await window.waitForURL(dashboardUrl());
-  await send(window, 'from-app', 7);
-  await expect.poll(() => app.evaluate(() => globalThis.notificationsShown)).toEqual(['from-app']);
-  if (isMac) {
-    await expect.poll(badge).toBe('7');
-    await window.evaluate(() => window.electronAPI.setUnreadCount(0));
-    await expect.poll(badge).toBe('');
-  }
-});
-
 test('a sign-in popup opens a second app window with the locked title', async () => {
   await startAt(window, loginUrl());
   const [popup] = await Promise.all([
@@ -423,9 +383,10 @@ test('the locked title follows the outside host from 127.0.0.1 to localhost', as
   expect(await openedExternally()).toEqual([]);
 });
 
-test('the app origin is granted notification permission', async () => {
+test('the app origin is granted notification permission, except in a quiet run', async () => {
   await startAt(window, dashboardUrl());
-  expect(await window.evaluate(() => Notification.requestPermission())).toBe('granted');
-  expect(await window.evaluate(() => Notification.permission)).toBe('granted');
+  const expected = helpers.quiet ? 'denied' : 'granted';
+  expect(await window.evaluate(() => Notification.requestPermission())).toBe(expected);
+  expect(await window.evaluate(() => Notification.permission)).toBe(expected);
   await screenshot(window, 'app-origin-notification-granted.png');
 });

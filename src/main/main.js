@@ -3,8 +3,7 @@ const path = require('path');
 
 // Modules
 const { createMenu, createRouteOpener } = require('./menu');
-const NotificationManager = require('./notifications');
-const DockManager = require('./dock');
+const { watchBadge } = require('./badge');
 const { createWindowRegistry } = require('./windows');
 const { PARTITION, setupSecurity } = require('./window-security');
 const { baseUrl } = require('./base-url');
@@ -16,15 +15,13 @@ const GLOBAL_SHORTCUT = 'CommandOrControl+Shift+H';
 
 // Managers
 let registry;
-let notificationManager;
-let dockManager;
 let trayManager;
 
 if (!app.isPackaged && process.env.HUBSPOT_DESKTOP_USER_DATA) {
   app.setPath('userData', process.env.HUBSPOT_DESKTOP_USER_DATA);
 }
 
-// Quiet mode for local test runs: no shown window, no focus, no dock icon, menu bar, tray or global shortcut.
+// Quiet mode for local test runs: no shown window, no focus, no dock icon, menu bar, tray, notification or global shortcut.
 const QUIET = !app.isPackaged && process.env.HUBSPOT_DESKTOP_QUIET === '1';
 if (QUIET && process.platform === 'darwin') app.setActivationPolicy('accessory');
 
@@ -61,8 +58,7 @@ app.whenReady().then(async () => {
   const contextActions = createActions({ openTab: (url) => registry.open({ url }) });
   app.on('web-contents-created', (event, contents) => contents.getType() === 'window' && attachContextMenu(contents, contextActions));
 
-  notificationManager = new NotificationManager(registry, { quiet: QUIET });
-  dockManager = new DockManager();
+  watchBadge({ registry, base: baseUrl(), setCount: (count) => app.setBadgeCount(count) });
   createMenu({ registry, openRoute: routes.open, newTab, newWindow, find: require('./find').createFind(registry) });
 
   if (!QUIET) {
@@ -101,15 +97,16 @@ app.on('window-all-closed', () => {
   }
 });
 
+// Chromium shows a web notification itself once its origin holds the permission. A quiet run never holds it,
+// so a local test run shows no notification.
 function setupPermissions(ses) {
   const base = baseUrl();
+  const allowed = (permission, origin) => !(QUIET && permission === 'notifications') && isPermissionAllowed(permission, origin, { base });
   ses.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    callback(isPermissionAllowed(permission, details.requestingUrl, { base }));
+    callback(allowed(permission, details.requestingUrl));
   });
 
-  ses.setPermissionCheckHandler((webContents, permission, requestingOrigin) =>
-    isPermissionAllowed(permission, requestingOrigin, { base })
-  );
+  ses.setPermissionCheckHandler((webContents, permission, requestingOrigin) => allowed(permission, requestingOrigin));
 }
 
 function setupUserAgent(ses) {
