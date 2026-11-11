@@ -4,11 +4,11 @@ A native Mac desktop app for HubSpot. No more browser tabs — access HubSpot di
 
 ## Features
 
-- **Menu Bar Menu** — Lists the eight Navigate destinations and opens the window on the one you pick
+- **Menu Bar Menu** — Lists the eight Navigate destinations and opens the window on the one you pick. A click on the icon shows the app
 - **Global Hotkey** — Press `Cmd+Shift+H` from anywhere to show/hide the app
 - **Session Persistence** — Stay logged in between app restarts
-- **Native Notifications** — HubSpot alerts as Mac notifications
-- **Dock Badge** — See unread counts at a glance
+- **Native Notifications** — HubSpot's own web notifications appear as system notifications. Only HubSpot app pages may send them
+- **Dock Badge** — The unread count HubSpot puts first in the page title, for example `(3) Inbox`. With several windows the badge shows the largest count. macOS shows it on the dock icon. The app sets the same count on Windows and Linux, where the taskbar or launcher decides whether to draw it
 - **Keyboard Shortcuts** — Quick navigation without touching your mouse
 - **Tabs and Close to Dock** — `Cmd+T` opens a native tab and `Cmd+N` a new window, both on Dashboards. Cmd+W closes a tab and hides the window on the last one, Cmd+Q quits
 - **Right-Click Menu** — Spelling suggestions, Cut, Copy and Paste, and link, image and page-link commands, as in any Mac app

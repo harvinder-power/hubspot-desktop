@@ -3,14 +3,15 @@ const path = require('path');
 const { ROUTES } = require('./routes');
 
 class TrayManager {
-  constructor(registry, openRoute) {
+  // TrayClass lets a quiet test run the tray code without a real tray icon.
+  constructor(registry, openRoute, { Tray: TrayClass = Tray } = {}) {
     this.registry = registry;
     this.openRoute = openRoute;
     this.tray = null;
-    this.createTray();
+    this.createTray(TrayClass);
   }
 
-  createTray() {
+  createTray(TrayClass) {
     // Create a smaller icon for the menu bar (22x22 is standard for macOS menu bar)
     const iconPath = path.join(__dirname, '../../assets/icon.png');
     let trayIcon = nativeImage.createFromPath(iconPath);
@@ -21,25 +22,14 @@ class TrayManager {
     // Set as template image for proper dark/light mode handling on macOS
     trayIcon.setTemplateImage(true);
 
-    this.tray = new Tray(trayIcon);
+    this.tray = new TrayClass(trayIcon);
     this.tray.setToolTip('HubSpot Desktop');
 
-    // Click on tray icon shows/hides the app
-    this.tray.on('click', () => {
-      this.toggleWindow();
-    });
+    // A click shows the app and brings it to the front. It never hides a visible window that is behind others.
+    this.tray.on('click', () => this.registry.show());
 
     // Right-click shows the menu
     this.updateMenu();
-  }
-
-  toggleWindow() {
-    const win = this.registry.active();
-    if (win?.isVisible()) {
-      win.hide();
-    } else {
-      this.registry.show();
-    }
   }
 
   updateMenu() {

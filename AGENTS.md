@@ -21,19 +21,22 @@
 - `npm test` runs the unit tests (`node --test test/unit/*.test.js`).
 - `npm run test:e2e` drives the real Electron app with Playwright against the fixture server.
 - `npm run build` builds the macOS app with electron-builder.
-- Local `npm run test:e2e` is quiet by default: no shown window or child window, focus, dock icon, dock bounce, tray or global shortcut. CI runs visible.
+- `npm run check:chars` fails on invisible and bidirectional control characters in tracked text files. It prints file, line, column and code point.
+- Local `npm run test:e2e` is quiet by default: no shown window or child window, focus, dock icon, dock bounce, tray, notification or global shortcut. CI runs visible.
+- A quiet run denies the `notifications` permission, so Chromium shows no web notification. Tests of the tray module pass a stand-in `Tray` class.
 - `HUBSPOT_DESKTOP_QUIET=0 npm run test:e2e` forces a visible local run. Quiet runs skip eighteen tests: the sixteen tests in `native tab groups (CI only)`, the last-window-before-ready-to-show test and the hide-and-show test. They need visible windows.
 - Agents never force a visible local run without the coordinator's say.
 - `npm run fixture` serves the fixture on `http://127.0.0.1:4321` for manual checks.
 
 ## CI
 
-- CI runs `npm test` and `npm run test:e2e` on `macos-latest`, `ubuntu-latest` and `windows-latest`.
+- CI runs `npm test` and `npm run test:e2e` on `macos-latest`, `ubuntu-latest` and `windows-latest`. Linux also runs `npm run check:chars`.
 - One OS failing does not cancel the others (`fail-fast: false`).
 - Linux runs e2e under `xvfb-run`. Windows needs no extra setup.
-- The Linux runner has no `libnotify4`, so the e2e suite stubs `Notification.isSupported()` with `show()`.
+- The quiet-mode notification test stubs no notification API. It proves that a page notification shows nothing from `Notification.permission === 'denied'`, read before any `new Notification`.
 - Off macOS, tests of macOS-only behaviour skip with a reason: native tab groups and the last window hiding.
-- Off macOS, the dock badge assertions do not run. On Linux, Electron does not report the renderer sandbox flag.
+- The badge tests record every `app.setBadgeCount` call and read `app.getBadgeCount()` on every OS. No test checks that the Windows taskbar or a Linux launcher draws the count. On Linux, Electron does not report the renderer sandbox flag.
+- Known hole: Electron 45.3 binds the web Badging API (`navigator.setAppBadge`) for every frame with no origin check, and no switch removes it. The badge test for it is marked `test.fail`, so it fails the run once the API is gone.
 - To read a failure on an OS you do not have:
   - `gh run view <run-id> --log-failed` prints the failing steps of every job.
   - The failed job uploads `test-results/` as the artifact `playwright-results-<os>`.
