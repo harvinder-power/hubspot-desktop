@@ -1,5 +1,6 @@
 const { Tray, Menu, nativeImage, app } = require('electron');
 const path = require('path');
+const { baseUrl, portalPrefix } = require('./base-url');
 
 class TrayManager {
   constructor(mainWindow, windowManager) {
@@ -112,12 +113,12 @@ class TrayManager {
 
     // Navigate to the path
     const currentUrl = this.mainWindow.webContents.getURL();
-    const match = currentUrl.match(/https:\/\/app\.hubspot\.com\/[^/]+\/\d+/);
+    const prefix = portalPrefix(currentUrl);
 
-    if (match) {
-      this.mainWindow.webContents.loadURL(`${match[0]}${path}`);
+    if (prefix) {
+      this.mainWindow.webContents.loadURL(`${prefix}${path}`);
     } else {
-      this.mainWindow.webContents.loadURL(`https://app.hubspot.com${path}`);
+      this.mainWindow.webContents.loadURL(`${baseUrl()}${path}`);
     }
   }
 

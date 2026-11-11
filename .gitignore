@@ -26,6 +26,10 @@ out/
 *.log
 npm-debug.log*
 
+# Test output
+test-results/
+playwright-report/
+
 # Electron builder cache
 .cache/
 
