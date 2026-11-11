@@ -1,8 +1,23 @@
 const { app, Menu, shell } = require('electron');
-const { baseUrl, portalPrefix } = require('./base-url');
+const { baseUrl } = require('./base-url');
+const { ROUTES, resolve, portalTracker } = require('./routes');
 
-function createMenu(mainWindow) {
+// Returns openRoute(id): shows the window and loads the route for the last portal it was on.
+function createRouteOpener(mainWindow, show) {
+  const base = baseUrl();
+  const portal = portalTracker({ base });
+  const observe = (event, url) => portal.observe(url);
+  mainWindow.webContents.on('did-navigate', observe);
+  mainWindow.webContents.on('did-navigate-in-page', observe);
+  return (routeId) => {
+    show();
+    mainWindow.webContents.loadURL(resolve(routeId, portal.context, { base }));
+  };
+}
+
+function createMenu(mainWindow, openRoute) {
   const isMac = process.platform === 'darwin';
+  const history = mainWindow.webContents.navigationHistory;
 
   const template = [
     // App Menu (Mac only)
@@ -10,12 +25,6 @@ function createMenu(mainWindow) {
       label: app.name,
       submenu: [
         { role: 'about' },
-        { type: 'separator' },
-        {
-          label: 'Preferences...',
-          accelerator: 'Cmd+,',
-          click: () => navigateTo(mainWindow, '/settings')
-        },
         { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
@@ -31,27 +40,6 @@ function createMenu(mainWindow) {
     {
       label: 'File',
       submenu: [
-        {
-          label: 'New Contact',
-          accelerator: 'CmdOrCtrl+N',
-          click: () => navigateTo(mainWindow, '/contacts')
-        },
-        {
-          label: 'New Company',
-          accelerator: 'CmdOrCtrl+Shift+N',
-          click: () => navigateTo(mainWindow, '/companies')
-        },
-        {
-          label: 'New Deal',
-          accelerator: 'CmdOrCtrl+D',
-          click: () => navigateTo(mainWindow, '/deals/board')
-        },
-        {
-          label: 'New Task',
-          accelerator: 'CmdOrCtrl+Shift+T',
-          click: () => navigateTo(mainWindow, '/tasks')
-        },
-        { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' }
       ]
     },
@@ -68,20 +56,7 @@ function createMenu(mainWindow) {
         { role: 'paste' },
         { role: 'pasteAndMatchStyle' },
         { role: 'delete' },
-        { role: 'selectAll' },
-        { type: 'separator' },
-        {
-          label: 'Find...',
-          accelerator: 'CmdOrCtrl+F',
-          click: () => {
-            mainWindow.webContents.executeJavaScript(`
-              const searchBtn = document.querySelector('[data-test-id="global-search-input"]') ||
-                               document.querySelector('[data-selenium="nav-search-button"]') ||
-                               document.querySelector('button[aria-label*="Search"]');
-              if (searchBtn) searchBtn.click();
-            `);
-          }
-        }
+        { role: 'selectAll' }
       ]
     },
 
@@ -105,65 +80,17 @@ function createMenu(mainWindow) {
     {
       label: 'Navigate',
       submenu: [
-        {
-          label: 'Dashboard',
-          accelerator: 'CmdOrCtrl+1',
-          click: () => navigateTo(mainWindow, '/reports-dashboard')
-        },
-        {
-          label: 'Contacts',
-          accelerator: 'CmdOrCtrl+2',
-          click: () => navigateTo(mainWindow, '/contacts')
-        },
-        {
-          label: 'Companies',
-          accelerator: 'CmdOrCtrl+3',
-          click: () => navigateTo(mainWindow, '/companies')
-        },
-        {
-          label: 'Deals',
-          accelerator: 'CmdOrCtrl+4',
-          click: () => navigateTo(mainWindow, '/deals/board')
-        },
-        {
-          label: 'Tasks',
-          accelerator: 'CmdOrCtrl+5',
-          click: () => navigateTo(mainWindow, '/tasks')
-        },
-        {
-          label: 'Tickets',
-          accelerator: 'CmdOrCtrl+6',
-          click: () => navigateTo(mainWindow, '/tickets')
-        },
-        { type: 'separator' },
-        {
-          label: 'Inbox',
-          accelerator: 'CmdOrCtrl+I',
-          click: () => navigateTo(mainWindow, '/conversations/inbox')
-        },
-        {
-          label: 'Calendar',
-          accelerator: 'CmdOrCtrl+K',
-          click: () => navigateTo(mainWindow, '/meetings')
-        },
+        ...ROUTES.map(({ id, label, accelerator }) => ({ label, accelerator, click: () => openRoute(id) })),
         { type: 'separator' },
         {
           label: 'Back',
           accelerator: 'CmdOrCtrl+[',
-          click: () => {
-            if (mainWindow.webContents.canGoBack()) {
-              mainWindow.webContents.goBack();
-            }
-          }
+          click: () => history.canGoBack() && history.goBack()
         },
         {
           label: 'Forward',
           accelerator: 'CmdOrCtrl+]',
-          click: () => {
-            if (mainWindow.webContents.canGoForward()) {
-              mainWindow.webContents.goForward();
-            }
-          }
+          click: () => history.canGoForward() && history.goForward()
         }
       ]
     },
@@ -210,20 +137,4 @@ function createMenu(mainWindow) {
   Menu.setApplicationMenu(menu);
 }
 
-function navigateTo(mainWindow, path) {
-  // Get the current URL to extract the portal ID
-  const currentUrl = mainWindow.webContents.getURL();
-
-  // Try to extract the portal base URL (includes portal ID)
-  const prefix = portalPrefix(currentUrl);
-
-  if (prefix) {
-    // Navigate within the same portal
-    mainWindow.webContents.loadURL(`${prefix}${path}`);
-  } else {
-    // Fallback: just go to the main HubSpot page with the path
-    mainWindow.webContents.loadURL(`${baseUrl()}${path}`);
-  }
-}
-
-module.exports = { createMenu };
+module.exports = { createMenu, createRouteOpener };

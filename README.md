@@ -17,17 +17,14 @@ A native Mac desktop app for HubSpot. No more browser tabs — access HubSpot di
 | Shortcut | Action |
 |----------|--------|
 | `Cmd+Shift+H` | **Show/Hide app (global)** |
-| `Cmd+1` | Dashboard |
+| `Cmd+1` | Dashboards |
 | `Cmd+2` | Contacts |
 | `Cmd+3` | Companies |
 | `Cmd+4` | Deals |
-| `Cmd+5` | Tasks |
-| `Cmd+6` | Tickets |
-| `Cmd+I` | Inbox |
-| `Cmd+K` | Calendar |
-| `Cmd+N` | New Contact |
-| `Cmd+D` | New Deal |
-| `Cmd+F` | Search |
+| `Cmd+5` | Tickets |
+| `Cmd+6` | Tasks |
+| `Cmd+7` | Inbox |
+| `Cmd+8` | Meetings |
 | `Cmd+[` | Back |
 | `Cmd+]` | Forward |
 
