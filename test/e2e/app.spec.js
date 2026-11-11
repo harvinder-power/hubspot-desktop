@@ -1,11 +1,10 @@
-const { test, expect, _electron: electron } = require('@playwright/test');
+const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const fixtureServer = require('../fixture/server');
+const helpers = require('./helpers');
 
-const repoRoot = path.join(__dirname, '..', '..');
-const evidenceDir = process.env.EVIDENCE_DIR || path.join(repoRoot, 'test-results', 'evidence');
+const { evidenceDir, launchApp } = helpers;
 
 let fixture;
 let idp;
@@ -23,22 +22,6 @@ const chainUrl = () => `${chain.url}/idp/authorize?return_to=${encodeURIComponen
 const DASHBOARD_STATE = () => ({ href: dashboardUrl(), title: '/reports-dashboard/4242' });
 const LOCKED_TITLE = '127.0.0.1 (external page)';
 
-// Launches the app against `baseUrl` with its own user-data directory and a stubbed shell.openExternal.
-async function launchApp(baseUrl) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubspot-desktop-e2e-'));
-  const electronApp = await electron.launch({
-    args: [repoRoot],
-    env: { ...process.env, HUBSPOT_DESKTOP_BASE_URL: baseUrl, HUBSPOT_DESKTOP_USER_DATA: dir },
-  });
-  await electronApp.evaluate(({ shell }) => {
-    globalThis.openedExternally = [];
-    shell.openExternal = async (url) => {
-      globalThis.openedExternally.push(url);
-    };
-  });
-  return { electronApp, dir };
-}
-
 function screenshot(page, name) {
   fs.mkdirSync(evidenceDir, { recursive: true });
   return page.screenshot({ path: path.join(evidenceDir, name) });
@@ -47,11 +30,7 @@ function screenshot(page, name) {
 const resetExternal = () => app.evaluate(() => { globalThis.openedExternally = []; });
 const openedExternally = () => app.evaluate(() => globalThis.openedExternally);
 
-// Every test starts from an explicit page with an empty openedExternally list.
-async function startAt(page, url) {
-  await page.goto(url);
-  await resetExternal();
-}
+const startAt = (page, url) => helpers.startAt(app, page, url);
 
 // Clicks through page.evaluate: Playwright's own click waits forever for a navigation the app cancels.
 function clickLink(page, selectorOrUrl) {

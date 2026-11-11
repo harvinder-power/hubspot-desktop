@@ -4,8 +4,8 @@ const { baseUrl } = require('./base-url');
 const { isAppOrigin } = require('./links');
 
 class NotificationManager {
-  constructor(mainWindow) {
-    this.mainWindow = mainWindow;
+  constructor(registry) {
+    this.registry = registry;
     this.setupIPC();
   }
 
@@ -27,13 +27,7 @@ class NotificationManager {
     });
 
     notification.on('click', () => {
-      if (this.mainWindow) {
-        if (this.mainWindow.isMinimized()) {
-          this.mainWindow.restore();
-        }
-        this.mainWindow.show();
-        this.mainWindow.focus();
-      }
+      this.registry.show();
       // Bounce dock icon
       if (process.platform === 'darwin') {
         app.dock.bounce('informational');

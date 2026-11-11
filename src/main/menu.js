@@ -2,24 +2,28 @@ const { app, Menu, shell } = require('electron');
 const { baseUrl } = require('./base-url');
 const { ROUTES, resolve, portalTracker } = require('./routes');
 
-// Returns openRoute(id): shows the window and loads the route for the last portal it was on.
-function createRouteOpener(mainWindow, show) {
+// One portal tracker fed by the main frame of every registry window.
+// url(id) is the route for the last portal seen. open(id) loads it in the active window.
+function createRouteOpener(registry) {
   const base = baseUrl();
   const portal = portalTracker({ base });
   // did-navigate fires for the main frame only; did-navigate-in-page fires for every frame.
-  mainWindow.webContents.on('did-navigate', (event, url) => portal.observe(url));
-  mainWindow.webContents.on('did-navigate-in-page', (event, url, isMainFrame) => {
-    if (isMainFrame) portal.observe(url);
+  registry.onWindow(({ webContents }) => {
+    webContents.on('did-navigate', (event, url) => portal.observe(url));
+    webContents.on('did-navigate-in-page', (event, url, isMainFrame) => {
+      if (isMainFrame) portal.observe(url);
+    });
   });
-  return (routeId) => {
-    show();
-    mainWindow.webContents.loadURL(resolve(routeId, portal.context, { base }));
+  const url = (routeId) => resolve(routeId, portal.context, { base });
+  return {
+    url,
+    open: (routeId) => registry.show().webContents.loadURL(url(routeId)),
   };
 }
 
-function createMenu(mainWindow, openRoute) {
+function createMenu({ registry, openRoute, newTab, newWindow }) {
   const isMac = process.platform === 'darwin';
-  const history = mainWindow.webContents.navigationHistory;
+  const history = () => registry.active()?.webContents.navigationHistory;
 
   const template = [
     // App Menu (Mac only)
@@ -42,6 +46,9 @@ function createMenu(mainWindow, openRoute) {
     {
       label: 'File',
       submenu: [
+        { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => newTab() },
+        { label: 'New Window', accelerator: 'CmdOrCtrl+N', click: () => newWindow() },
+        { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' }
       ]
     },
@@ -87,12 +94,12 @@ function createMenu(mainWindow, openRoute) {
         {
           label: 'Back',
           accelerator: 'CmdOrCtrl+[',
-          click: () => history.canGoBack() && history.goBack()
+          click: () => history()?.canGoBack() && history().goBack()
         },
         {
           label: 'Forward',
           accelerator: 'CmdOrCtrl+]',
-          click: () => history.canGoForward() && history.goForward()
+          click: () => history()?.canGoForward() && history().goForward()
         }
       ]
     },
@@ -104,6 +111,13 @@ function createMenu(mainWindow, openRoute) {
         { role: 'minimize' },
         { role: 'zoom' },
         ...(isMac ? [
+          { type: 'separator' },
+          { role: 'selectNextTab' },
+          { role: 'selectPreviousTab' },
+          { role: 'showAllTabs' },
+          { role: 'mergeAllWindows' },
+          { role: 'moveTabToNewWindow' },
+          { role: 'toggleTabBar' },
           { type: 'separator' },
           { role: 'front' },
           { type: 'separator' },

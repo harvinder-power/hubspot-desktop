@@ -1,11 +1,10 @@
-const { test, expect, _electron: electron } = require('@playwright/test');
+const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const fixtureServer = require('../fixture/server');
+const helpers = require('./helpers');
 
-const repoRoot = path.join(__dirname, '..', '..');
-const evidenceDir = process.env.EVIDENCE_DIR || path.join(repoRoot, 'test-results', 'evidence');
+const { repoRoot, evidenceDir, launchApp } = helpers;
 
 let fixture;
 let userData;
@@ -26,11 +25,7 @@ const ROUTE_PATHS = {
   Meetings: '/meetings/4242',
 };
 
-// Every test starts from an explicit page with an empty openedExternally list.
-async function startAt(page, url) {
-  await page.goto(url);
-  await app.evaluate(() => { globalThis.openedExternally = []; });
-}
+const startAt = (page, url) => helpers.startAt(app, page, url);
 
 const clickNavigate = (label) =>
   app.evaluate(({ Menu }, name) => {
@@ -42,17 +37,7 @@ const clickNavigate = (label) =>
 
 test.beforeAll(async () => {
   fixture = await fixtureServer.start(0, { portalId: '4242' });
-  userData = fs.mkdtempSync(path.join(os.tmpdir(), 'hubspot-desktop-e2e-'));
-  app = await electron.launch({
-    args: [repoRoot],
-    env: { ...process.env, HUBSPOT_DESKTOP_BASE_URL: fixture.url, HUBSPOT_DESKTOP_USER_DATA: userData },
-  });
-  await app.evaluate(({ shell }) => {
-    globalThis.openedExternally = [];
-    shell.openExternal = async (url) => {
-      globalThis.openedExternally.push(url);
-    };
-  });
+  ({ electronApp: app, dir: userData } = await launchApp(fixture.url));
   window = await app.firstWindow();
   await window.waitForURL(dashboardUrl());
 });
@@ -150,7 +135,7 @@ test('the tray menu lists the routes in table order', async () => {
 });
 
 const BANNED_ACCELERATORS = [
-  'CmdOrCtrl+K', 'CmdOrCtrl+I', 'CmdOrCtrl+F', 'CmdOrCtrl+N', 'CmdOrCtrl+D', 'Cmd+,',
+  'CmdOrCtrl+K', 'CmdOrCtrl+I', 'CmdOrCtrl+F', 'CmdOrCtrl+D', 'Cmd+,',
   'CmdOrCtrl+Shift+N', 'CmdOrCtrl+Shift+T', 'CmdOrCtrl+,',
 ];
 const BANNED_LABELS = [

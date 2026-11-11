@@ -3,8 +3,7 @@ const { baseUrl } = require('./base-url');
 const { isAppOrigin } = require('./links');
 
 class DockManager {
-  constructor(mainWindow) {
-    this.mainWindow = mainWindow;
+  constructor() {
     this.currentCount = 0;
     this.setupIPC();
   }
