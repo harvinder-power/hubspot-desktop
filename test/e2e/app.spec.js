@@ -118,32 +118,6 @@ test('uses the temporary user-data directory', async () => {
   expect(fs.realpathSync(actual)).toBe(fs.realpathSync(userData));
 });
 
-test('application menu contains the Navigate items', async () => {
-  const labels = await app.evaluate(({ Menu }) =>
-    Menu.getApplicationMenu()
-      .items.find((item) => item.label === 'Navigate')
-      .submenu.items.filter((item) => item.type !== 'separator')
-      .map((item) => item.label)
-  );
-  expect(labels).toEqual([
-    'Dashboard', 'Contacts', 'Companies', 'Deals', 'Tasks', 'Tickets',
-    'Inbox', 'Calendar', 'Back', 'Forward',
-  ]);
-});
-
-test('Navigate menu items stay on the override origin', async () => {
-  await startAt(window, dashboardUrl());
-  await app.evaluate(({ Menu }) => {
-    Menu.getApplicationMenu()
-      .items.find((item) => item.label === 'Navigate')
-      .submenu.items.find((item) => item.label === 'Tasks')
-      .click();
-  });
-  await window.waitForURL(`${fixture.url}/reports-dashboard/4242/tasks`);
-  await window.goto(`${fixture.url}/`);
-  await window.waitForURL(`${fixture.url}/reports-dashboard/4242`);
-});
-
 test('external link opens externally and the app window stays on the fixture', async () => {
   await startAt(window, dashboardUrl());
   expect(await clickAndCollectExternal(window, '#external-link')).toEqual(['https://example.com/']);

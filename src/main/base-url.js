@@ -7,10 +7,4 @@ function baseUrl(app = require('electron').app, env = process.env) {
   return DEFAULT_BASE_URL;
 }
 
-function portalPrefix(url, base = baseUrl()) {
-  if (!url.startsWith(base + '/')) return null;
-  const match = url.slice(base.length).match(/^\/[^/]+\/\d+/);
-  return match ? base + match[0] : null;
-}
-
-module.exports = { baseUrl, portalPrefix, DEFAULT_BASE_URL };
+module.exports = { baseUrl, DEFAULT_BASE_URL };

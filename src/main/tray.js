@@ -1,11 +1,12 @@
 const { Tray, Menu, nativeImage, app } = require('electron');
 const path = require('path');
-const { baseUrl, portalPrefix } = require('./base-url');
+const { ROUTES } = require('./routes');
 
 class TrayManager {
-  constructor(mainWindow, windowManager) {
+  constructor(mainWindow, windowManager, openRoute) {
     this.mainWindow = mainWindow;
     this.windowManager = windowManager;
+    this.openRoute = openRoute;
     this.tray = null;
     this.createTray();
   }
@@ -42,84 +43,22 @@ class TrayManager {
   }
 
   updateMenu() {
-    const contextMenu = Menu.buildFromTemplate([
-      {
-        label: 'Show HubSpot',
-        click: () => this.windowManager.focusOrCreate()
-      },
+    const show = () => this.windowManager.focusOrCreate();
+    this.tray.setContextMenu(Menu.buildFromTemplate(TrayManager.menuTemplate(show, this.openRoute)));
+  }
+
+  static menuTemplate(show, openRoute) {
+    return [
+      { label: 'Show HubSpot', click: show },
       { type: 'separator' },
-      {
-        label: 'Quick Actions',
-        submenu: [
-          {
-            label: 'New Contact',
-            accelerator: 'CmdOrCtrl+Shift+N',
-            click: () => this.openQuickAction('/contacts')
-          },
-          {
-            label: 'New Company',
-            click: () => this.openQuickAction('/companies')
-          },
-          {
-            label: 'New Deal',
-            click: () => this.openQuickAction('/deals/board')
-          },
-          {
-            label: 'New Task',
-            click: () => this.openQuickAction('/tasks')
-          },
-          {
-            label: 'New Ticket',
-            click: () => this.openQuickAction('/tickets')
-          }
-        ]
-      },
-      { type: 'separator' },
-      {
-        label: 'Go To',
-        submenu: [
-          {
-            label: 'Dashboard',
-            click: () => this.openQuickAction('/reports-dashboard')
-          },
-          {
-            label: 'Inbox',
-            click: () => this.openQuickAction('/conversations/inbox')
-          },
-          {
-            label: 'Tasks',
-            click: () => this.openQuickAction('/tasks')
-          },
-          {
-            label: 'Calendar',
-            click: () => this.openQuickAction('/meetings')
-          }
-        ]
-      },
+      ...ROUTES.map(({ id, label }) => ({ label, click: () => openRoute(id) })),
       { type: 'separator' },
       {
         label: 'Quit HubSpot Desktop',
         accelerator: 'CmdOrCtrl+Q',
         click: () => app.quit()
       }
-    ]);
-
-    this.tray.setContextMenu(contextMenu);
-  }
-
-  openQuickAction(path) {
-    // Show the window first
-    this.windowManager.focusOrCreate();
-
-    // Navigate to the path
-    const currentUrl = this.mainWindow.webContents.getURL();
-    const prefix = portalPrefix(currentUrl);
-
-    if (prefix) {
-      this.mainWindow.webContents.loadURL(`${prefix}${path}`);
-    } else {
-      this.mainWindow.webContents.loadURL(`${baseUrl()}${path}`);
-    }
+    ];
   }
 
   destroy() {

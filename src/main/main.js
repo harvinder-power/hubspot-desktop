@@ -2,7 +2,7 @@ const { app, BrowserWindow, session, ipcMain, globalShortcut, shell } = require(
 const path = require('path');
 
 // Modules
-const { createMenu } = require('./menu');
+const { createMenu, createRouteOpener } = require('./menu');
 const NotificationManager = require('./notifications');
 const DockManager = require('./dock');
 const WindowManager = require('./window-state');
@@ -49,10 +49,11 @@ app.whenReady().then(async () => {
   // Initialize managers
   notificationManager = new NotificationManager(mainWindow);
   dockManager = new DockManager(mainWindow);
-  trayManager = new TrayManager(mainWindow, windowManager);
+  const openRoute = createRouteOpener(mainWindow, () => windowManager.focusOrCreate());
+  trayManager = new TrayManager(mainWindow, windowManager, openRoute);
 
   // Create menu
-  createMenu(mainWindow);
+  createMenu(mainWindow, openRoute);
 
   // Setup security handlers
   setupSecurity(mainWindow.webContents);
