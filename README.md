@@ -11,6 +11,7 @@ A native Mac desktop app for HubSpot. No more browser tabs — access HubSpot di
 - **Dock Badge** — See unread counts at a glance
 - **Keyboard Shortcuts** — Quick navigation without touching your mouse
 - **Tabs and Close to Dock** — `Cmd+T` opens a native tab and `Cmd+N` a new window, both on Dashboards. Cmd+W closes a tab and hides the window on the last one, Cmd+Q quits
+- **Right-Click Menu** — Spelling suggestions, Cut, Copy and Paste, and link, image and page-link commands, as in any Mac app
 
 ## Keyboard Shortcuts
 
@@ -19,6 +20,8 @@ A native Mac desktop app for HubSpot. No more browser tabs — access HubSpot di
 | `Cmd+Shift+H` | **Show/Hide app (global)** |
 | `Cmd+T` | New Tab |
 | `Cmd+N` | New Window |
+| `Cmd+Shift+C` | Copy Page Link |
+| `Cmd+Shift+O` | Open Page in Browser |
 | `Cmd+1` | Dashboards |
 | `Cmd+2` | Contacts |
 | `Cmd+3` | Companies |
