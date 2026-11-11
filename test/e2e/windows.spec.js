@@ -239,6 +239,78 @@ test.describe('native tab groups (CI only)', () => {
     await expect.poll(onScreen).toEqual([true, true]);
   });
 
+  test('a sign-in popup that reaches an app page never hosts its target=_blank child', async () => {
+    await startAt(app, first, `${fixture.url}/login`);
+    const url = `${idpUrl()}?return_to=${encodeURIComponent(dashboardUrl())}`;
+    const [popup] = await Promise.all([app.waitForEvent('window'), first.evaluate((u) => { window.open(u); }, url)]);
+    await popup.waitForURL(url);
+    await popup.evaluate(() => document.querySelector('#return-link').click());
+    await popup.waitForURL(dashboardUrl());
+    const [child] = await Promise.all([app.waitForEvent('window'), popup.evaluate(() => document.querySelector('#blank-link').click())]);
+    await child.waitForURL(contactsUrl());
+    await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true, true]);
+    await expect.poll(onScreen).toEqual([true, true, true]);
+    await popup.goto(`${fixture.url}/login`);
+    await expect.poll(onScreen).toEqual([true, true, true]);
+    await popup.evaluate(() => document.querySelector('#idp-link').click());
+    await popup.waitForURL(/\/idp\/authorize/);
+    await expect.poll(onScreen).toEqual([true, true, true]);
+  });
+
+  test('a tabbed window on /login that fails to load an unreachable host leaves the tab group', async () => {
+    const tab = await newTab();
+    await expect.poll(onScreen).toEqual([false, true]);
+    await tab.goto(`${fixture.url}/login`);
+    await expect.poll(onScreen).toEqual([false, true]);
+    // Nothing listens on port 1, so the load fails and the window commits an error page.
+    await tab.evaluate(() => { location.href = 'http://127.0.0.1:1/'; });
+    await expect.poll(async () => (await windowInfo())[1].url).toBe('http://127.0.0.1:1/');
+    await expect.poll(onScreen).toEqual([true, true]);
+  });
+
+  // By default macOS tabs a new window into the group of a full-screen window ("Prefer tabs: in full screen").
+  // Tab membership survives leaving full screen, so the windows are read after every window leaves it.
+  async function enterFullScreen(index) {
+    await app.evaluate(({ BrowserWindow }, i) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[i].setFullScreen(true), index);
+    const full = () => app.evaluate(({ BrowserWindow }, i) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[i].isFullScreen(), index);
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      if (await full()) return true;
+      await first.waitForTimeout(250);
+    }
+    return false;
+  }
+  async function leaveFullScreen() {
+    await app.evaluate(({ BrowserWindow }) => {
+      for (const w of BrowserWindow.getAllWindows()) if (w.isFullScreen()) w.setFullScreen(false);
+    });
+    await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((w) => w.isFullScreen())), { timeout: 15_000 }).toBe(false);
+    await first.waitForTimeout(1000);
+  }
+
+  for (const scenario of ['opener on an outside page', 'child redirected outside before show']) {
+    test(`in full screen an app child is not grouped with an outside page (${scenario})`, async () => {
+      const outsideOpener = scenario === 'opener on an outside page';
+      if (outsideOpener) {
+        await startAt(app, first, `${fixture.url}/login`);
+        await first.evaluate(() => document.querySelector('#idp-link').click());
+        await first.waitForURL(/\/idp\/authorize/);
+      }
+      const entered = await enterFullScreen(0);
+      console.log(`full screen (${scenario}): entered ${entered}`);
+      test.skip(!entered, 'INCONCLUSIVE: the runner did not enter full screen');
+      const childUrl = outsideOpener ? dashboardUrl() : `${fixture.url}/redirect-out`;
+      const [child] = await Promise.all([app.waitForEvent('window'), first.evaluate((u) => { window.open(u); }, childUrl)]);
+      await child.waitForURL(outsideOpener ? dashboardUrl() : /\/idp\/authorize/);
+      await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true]);
+      await first.waitForTimeout(1000);
+      console.log(`full screen (${scenario}): onScreen in full screen ${JSON.stringify(await onScreen())}`);
+      await leaveFullScreen();
+      console.log(`full screen (${scenario}): onScreen after full screen ${JSON.stringify(await onScreen())}`);
+      await expect.poll(onScreen).toEqual([true, true]);
+    });
+  }
+
   test('Back to an outside history entry in a tabbed window leaves the tab group', async () => {
     await startAt(app, first, `${fixture.url}/login`);
     await first.evaluate(() => document.querySelector('#idp-link').click());
@@ -313,6 +385,25 @@ for (const where of ['outside popup', 'app window']) {
     expect((await windowInfo())[index].title).toBe('about: (external page)');
   });
 }
+
+// location.replace leaves [/login, about:blank]: the entry before the blank page is an app page.
+test('an outside page in an app window that replaces itself with about:blank keeps a locked title', async () => {
+  await startAt(app, first, `${fixture.url}/login`);
+  await first.evaluate(() => document.querySelector('#idp-link').click());
+  await first.waitForURL(/\/idp\/authorize/);
+  await first.evaluate(() => { location.replace('about:blank'); });
+  await expect.poll(async () => (await windowInfo())[0].url).toBe('about:blank');
+  await first.evaluate(() => { document.title = 'HubSpot'; });
+  await first.waitForTimeout(500);
+  expect((await windowInfo())[0].title).toBe('about: (external page)');
+});
+
+test('a target=_blank child on /login does not clear the portal for the other windows', async () => {
+  await signInChild();
+  await pretendFocused(0);
+  await clickMenu('Navigate', 'Deals');
+  await first.waitForURL(dealsUrl(), { timeout: 10_000 });
+});
 
 test('a window that page opened is a registry window: menus, the + button and the portal tracker cover it', async () => {
   const child = await blankLinkChild();

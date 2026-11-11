@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { isAppOrigin, pageKind, childWindowKind, lockedTitle, decide, isPermissionAllowed, RULES, SIGN_IN_PATHS } = require('../../src/main/links');
+const { isAppOrigin, pageKind, childWindowKind, tabEligible, lockedTitle, decide, isPermissionAllowed, RULES, SIGN_IN_PATHS } = require('../../src/main/links');
 
 const RECORD = 'https://app.hubspot.com/contacts/4242/record/0-1/101';
 const LOGIN = 'https://app.hubspot.com/login';
@@ -95,19 +95,47 @@ test('lockedTitle is null for app pages and the empty page, and names the host o
   assert.equal(lockedTitle(''), null);
   assert.equal(lockedTitle('https://idp.example/authorize?x=1'), 'idp.example (external page)');
   assert.equal(lockedTitle(`https://${String.fromCodePoint(0x430)}pple.com/`), 'xn--pple-43d.com (external page)');
-  assert.equal(lockedTitle('about:blank'), null);
   assert.equal(lockedTitle('about:srcdoc'), 'about: (external page)');
   assert.equal(lockedTitle('https://app.hubspot.com.evil.example/'), 'app.hubspot.com.evil.example (external page)');
   assert.equal(lockedTitle('http://127.0.0.1:4322/idp', { base: OVERRIDE }), '127.0.0.1 (external page)');
 });
 
-test('lockedTitle locks a blank page in an outside popup or after an outside page only', () => {
-  assert.equal(lockedTitle('about:blank', { outsidePopup: true }), 'about: (external page)');
-  assert.equal(lockedTitle('about:blank', { previousUrl: OKTA }), 'about: (external page)');
-  assert.equal(lockedTitle('about:blank', { previousUrl: RECORD }), null);
-  assert.equal(lockedTitle('about:blank', { previousUrl: LOGIN }), null);
-  assert.equal(lockedTitle('about:blank', { previousUrl: '' }), null);
-  assert.equal(lockedTitle(RECORD, { outsidePopup: true, previousUrl: OKTA }), null);
+// Each row is a window history that ends on a blank page, and whether the app opened the window blank.
+// The caller passes appOpenedBlank only while the window has committed nothing but blank pages.
+test('lockedTitle unlocks a blank page only as entry 0 of a blank child the app opened', () => {
+  const LOCKED = 'about: (external page)';
+  const rows = [
+    { history: ['about:blank'], appOpenedBlank: true, title: null },
+    { history: [LOGIN, 'about:blank'], appOpenedBlank: false, title: LOCKED },
+    { history: [OKTA, 'about:blank'], appOpenedBlank: false, title: LOCKED },
+    { history: [RECORD, OKTA, 'about:blank'], appOpenedBlank: false, title: LOCKED },
+    { history: ['about:blank'], appOpenedBlank: false, title: LOCKED },
+    { history: ['about:blank', 'about:blank'], appOpenedBlank: true, title: LOCKED },
+  ];
+  for (const { history, appOpenedBlank, title } of rows) {
+    const options = { activeIndex: history.length - 1, appOpenedBlank };
+    assert.equal(lockedTitle(history.at(-1), options), title, JSON.stringify({ history, appOpenedBlank }));
+  }
+  assert.equal(lockedTitle(RECORD, { activeIndex: 0, appOpenedBlank: true }), null);
+  assert.equal(lockedTitle(OKTA, { activeIndex: 0, appOpenedBlank: true }), 'example-corp.okta.com (external page)');
+});
+
+test('tabEligible is true only for a registry window on an app or app sign-in page', () => {
+  const rows = [
+    [true, 'none', false],
+    [true, 'blank', false],
+    [true, 'app-sign-in', true],
+    [true, 'app', true],
+    [true, 'outside', false],
+    [false, 'none', false],
+    [false, 'blank', false],
+    [false, 'app-sign-in', false],
+    [false, 'app', false],
+    [false, 'outside', false],
+  ];
+  for (const [inRegistry, committedKind, expected] of rows) {
+    assert.equal(tabEligible({ inRegistry, committedKind }), expected, `${inRegistry} ${committedKind}`);
+  }
 });
 
 test('the rules table keeps its order', () => {
