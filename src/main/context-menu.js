@@ -1,7 +1,7 @@
 // Right-click menu. buildTemplate is pure and must not require electron, so node --test can load it.
 // An item is { id, label, enabled?, type?: 'separator', role?, run?: string, arg? }.
 // `run` names a function in the actions map that attach() is given; it is called as run(arg, contents).
-const { decide, pageKind } = require('./links');
+const { isAppOrigin, pageKind } = require('./links');
 
 const MAX_SUGGESTIONS = 5;
 
@@ -25,6 +25,9 @@ const isWebUrl = (url) => ['http:', 'https:'].includes(parse(url)?.protocol);
 const pageLink = (url, base) => (url && pageKind(url, { base }) === 'app' ? url : null);
 
 const ADDRESS_LINKS = { 'mailto:': { id: 'copy-address', label: 'Copy Address' }, 'tel:': { id: 'copy-number', label: 'Copy Number' } };
+// C0 and C1 controls and the bidirectional embedding, override and isolate controls.
+const UNSAFE_CHARS = /[\u0000-\u001F\u007F-\u009F‪-‮⁦-⁩]/g;
+const address = (url) => decode(url.pathname).replace(UNSAFE_CHARS, '').trim();
 
 const EDIT_ITEMS = [
   { id: 'undo', label: 'Undo', role: 'undo', flag: 'canUndo' },
@@ -51,13 +54,17 @@ function spelling({ misspelledWord, dictionarySuggestions = [] }) {
   ];
 }
 
-function link({ linkURL }, { pageUrl, base }) {
+function link({ linkURL }, { base }) {
   const url = parse(linkURL);
   if (!url) return [];
-  const address = ADDRESS_LINKS[url.protocol];
-  if (address) return [{ ...address, run: 'copyText', arg: decode(url.pathname) }];
+  const addressItem = ADDRESS_LINKS[url.protocol];
+  if (addressItem) {
+    const text = address(url);
+    return text ? [{ ...addressItem, run: 'copyText', arg: text }] : [];
+  }
   if (!isWebUrl(linkURL)) return [];
-  const inApp = decide({ url: linkURL, currentUrl: pageUrl, kind: 'open', base }) === 'allow';
+  // The page that shows the link does not matter: an app URL opens an app page in any tab.
+  const inApp = isAppOrigin(linkURL, { base });
   return [
     ...(inApp ? [{ id: 'open-link-in-new-tab', label: 'Open Link in New Tab', run: 'openTab', arg: linkURL }] : []),
     { id: 'open-link-in-browser', label: 'Open Link in Browser', run: 'openInBrowser', arg: linkURL },
@@ -66,16 +73,16 @@ function link({ linkURL }, { pageUrl, base }) {
 }
 
 function image({ mediaType, srcURL, x, y }) {
-  if (mediaType !== 'image' || !isWebUrl(srcURL)) return [];
+  if (mediaType !== 'image') return [];
   return [
     { id: 'copy-image', label: 'Copy Image', run: 'copyImageAt', arg: { x, y } },
-    { id: 'copy-image-address', label: 'Copy Image Address', run: 'copyText', arg: srcURL },
+    ...(isWebUrl(srcURL) ? [{ id: 'copy-image-address', label: 'Copy Image Address', run: 'copyText', arg: srcURL }] : []),
   ];
 }
 
-function edit({ isEditable, selectionText = '', editFlags }) {
+function edit({ isEditable, selectionText, editFlags }) {
   if (isEditable) return EDIT_ITEMS.map((item) => editItem(item, editFlags));
-  return selectionText.trim() ? [editItem(EDIT_ITEMS.find(({ id }) => id === 'copy'), editFlags)] : [];
+  return typeof selectionText === 'string' && selectionText.trim() ? [editItem(EDIT_ITEMS.find(({ id }) => id === 'copy'), editFlags)] : [];
 }
 
 function page(params, { pageUrl, base, canGoBack = false, canGoForward = false }, anyAbove) {
@@ -144,7 +151,7 @@ function attach(contents, actions) {
       canGoForward: history.canGoForward(),
     };
     const template = buildTemplate(params, context).map(({ run, arg, ...item }) =>
-      run ? { ...item, click: () => actions[run](arg, contents) } : item
+      run ? { ...item, click: () => contents.isDestroyed() || actions[run](arg, contents) } : item
     );
     Menu.buildFromTemplate(template).popup({ window: BrowserWindow.fromWebContents(contents) });
   });

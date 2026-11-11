@@ -1,4 +1,4 @@
-const { app, clipboard, Menu, shell } = require('electron');
+const { app, BrowserWindow, clipboard, Menu, shell } = require('electron');
 const { baseUrl } = require('./base-url');
 const { ROUTES, resolve, portalTracker } = require('./routes');
 const { pageLink } = require('./context-menu');
@@ -26,9 +26,10 @@ function createMenu({ registry, openRoute, newTab, newWindow }) {
   const isMac = process.platform === 'darwin';
   const history = () => registry.active()?.webContents.navigationHistory;
   const base = baseUrl();
-  // Runs `use` on the active page's URL only when that page is an app page.
+  // Runs `use` on the focused (else the active) window's URL only when that page is an app page.
   const withPageLink = (use) => {
-    const url = pageLink(registry.active()?.webContents.getURL(), base);
+    const window = BrowserWindow.getFocusedWindow() ?? registry.active();
+    const url = pageLink(window?.webContents.getURL(), base);
     if (url) use(url);
   };
 

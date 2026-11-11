@@ -104,9 +104,75 @@ const CASES = [
     expected: [{ id: 'copy-image', label: 'Copy Image' }, { id: 'copy-image-address', label: 'Copy Image Address' }, sep(1), DEV],
   },
   {
-    name: 'an image with a data: source has no image section',
+    name: 'an image with a data: source offers Copy Image without its address',
     params: { mediaType: 'image', srcURL: 'data:image/png;base64,AAAA', linkURL: 'https://example.com/' },
+    expected: [
+      { id: 'open-link-in-browser', label: 'Open Link in Browser' },
+      { id: 'copy-link', label: 'Copy Link' },
+      sep(1),
+      { id: 'copy-image', label: 'Copy Image' },
+      sep(2),
+      DEV,
+    ],
+  },
+  {
+    name: 'an image with a blob: source offers Copy Image without its address',
+    params: { mediaType: 'image', srcURL: 'blob:https://app.hubspot.com/7d3e0c5a-1b2c-4d5e-8f90-a1b2c3d4e5f6' },
+    expected: [{ id: 'copy-image', label: 'Copy Image' }, sep(1), DEV],
+  },
+  {
+    name: 'an outside https link on the sign-in page has no Open Link in New Tab',
+    params: { linkURL: 'https://example.com/pricing' },
+    context: { pageUrl: 'https://app.hubspot.com/login' },
     expected: [{ id: 'open-link-in-browser', label: 'Open Link in Browser' }, { id: 'copy-link', label: 'Copy Link' }, sep(1), DEV],
+  },
+  {
+    name: 'an app link on the sign-in page offers Open Link in New Tab',
+    params: { linkURL: APP_LINK },
+    context: { pageUrl: 'https://app.hubspot.com/login' },
+    expected: [
+      { id: 'open-link-in-new-tab', label: 'Open Link in New Tab' },
+      { id: 'open-link-in-browser', label: 'Open Link in Browser' },
+      { id: 'copy-link', label: 'Copy Link' },
+      sep(1),
+      DEV,
+    ],
+  },
+  {
+    name: 'an app link on an outside page offers Open Link in New Tab',
+    params: { linkURL: APP_LINK },
+    context: { pageUrl: OUTSIDE_PAGE },
+    expected: [
+      { id: 'open-link-in-new-tab', label: 'Open Link in New Tab' },
+      { id: 'open-link-in-browser', label: 'Open Link in Browser' },
+      { id: 'copy-link', label: 'Copy Link' },
+      sep(1),
+      DEV,
+    ],
+  },
+  {
+    name: 'a mailto: link with no address has no link section',
+    params: { linkURL: 'mailto:?to=x@y' },
+    context: { pageUrl: OUTSIDE_PAGE },
+    expected: [
+      { id: 'back', label: 'Back', enabled: false },
+      { id: 'forward', label: 'Forward', enabled: false },
+      { id: 'reload', label: 'Reload' },
+      sep(1),
+      DEV,
+    ],
+  },
+  {
+    name: 'a null selectionText counts as no selection',
+    params: { selectionText: null },
+    context: { pageUrl: OUTSIDE_PAGE },
+    expected: [
+      { id: 'back', label: 'Back', enabled: false },
+      { id: 'forward', label: 'Forward', enabled: false },
+      { id: 'reload', label: 'Reload' },
+      sep(1),
+      DEV,
+    ],
   },
   {
     name: 'an image inside a link',
@@ -248,6 +314,28 @@ test('buildTemplate binds each action to the value it acts on', () => {
     ['open-page-in-browser', 'openInBrowser', APP_PAGE],
     ['inspect-element', 'inspect', { x: 10, y: 20 }],
   ]);
+});
+
+test('Copy Address and Copy Number copy the decoded address without control or bidirectional characters', () => {
+  const copied = (linkURL) =>
+    build({ params: { linkURL }, context: { isPackaged: true } })
+      .filter((item) => item.id === 'copy-address' || item.id === 'copy-number')
+      .map((item) => item.arg);
+  assert.deepEqual(copied('mailto:a@b.c%0D%0Abcc:x@evil'), ['a@b.cbcc:x@evil']);
+  assert.deepEqual(copied('mailto:%E2%80%AEmoc.live@a'), ['moc.live@a']);
+  assert.deepEqual(copied('mailto:%E2%81%A6a@b.c%E2%81%A9%C2%85'), ['a@b.c']);
+  assert.deepEqual(copied('tel:+44%00123'), ['+44123']);
+  assert.deepEqual(copied('mailto:?to=x@y'), []);
+  assert.deepEqual(copied('mailto:%20%0A'), []);
+  assert.deepEqual(copied('mailto:a@b.c?subject=x'), ['a@b.c']);
+});
+
+test('buildTemplate treats a non-string selectionText as no selection', () => {
+  for (const selectionText of [null, undefined, 42, {}]) {
+    assert.deepEqual(summary(build({ params: { selectionText }, context: { isPackaged: true, pageUrl: OUTSIDE_PAGE } })).map(({ id }) => id), [
+      'back', 'forward', 'reload',
+    ]);
+  }
 });
 
 test('edit items use native roles', () => {
