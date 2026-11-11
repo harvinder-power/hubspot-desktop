@@ -65,6 +65,7 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
     win.once('ready-to-show', () => {
       if (quiet) return;
       // A tab joins its group once its contents are ready. Added at creation, it joined in 1 of 3 CI runs.
+      if (host && !host.isDestroyed() && host.isVisible()) host.addTabbedWindow(win);
       win.show();
       if (state?.isMaximized) win.maximize();
     });
