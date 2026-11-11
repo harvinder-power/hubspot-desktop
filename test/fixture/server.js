@@ -36,6 +36,20 @@ function editorPage() {
 <input id="text-input" type="text">`);
 }
 
+// A page without a portal ID that embeds a same-origin frame.
+function frameHostPage() {
+  return page('Frame host', `
+<h1>Frame host</h1>
+<iframe id="child-frame" src="/frame-child"></iframe>`);
+}
+
+// The frame moves its own history to a path with another portal ID, as an embedded app view may.
+function frameChildPage() {
+  return page('Frame child', `
+<h1>Frame child</h1>
+<script>history.pushState({}, '', '/contacts/99/objects/0-1/views/all/list'); document.title = 'pushed';</script>`);
+}
+
 // Sign-in page. Links to an identity provider on another origin, as SSO does.
 function loginPage(idpOrigin, returnTo) {
   const href = `${idpOrigin}/idp/authorize?return_to=${encodeURIComponent(returnTo)}`;
@@ -79,6 +93,8 @@ function handle(req, res, { portalId, idpOrigin, chainOrigin, rootToIdp }) {
   let html;
   if (title) html = page(`(${title[1]}) Inbox`, `<h1>(${title[1]}) Inbox</h1>`);
   else if (pathname === '/editor') html = editorPage();
+  else if (pathname === '/frame-host') html = frameHostPage();
+  else if (pathname === '/frame-child') html = frameChildPage();
   else if (pathname === '/login') html = loginPage(idpOrigin, returnTo);
   else if (pathname === '/idp/authorize') html = idpPage(searchParams.get('return_to') || '/');
   else html = hubPage(pathname, portalId);

@@ -1,7 +1,7 @@
 // App destinations and the portal context they resolve against.
 // Pure module. It must not require electron, so node --test can load it.
 const { DEFAULT_BASE_URL } = require('./base-url');
-const { isAppOrigin } = require('./links');
+const { pageKind } = require('./links');
 
 // Menu order. Accelerators are CmdOrCtrl+1 to CmdOrCtrl+8 in this order.
 const ROUTES = Object.freeze(
@@ -19,9 +19,9 @@ const ROUTES = Object.freeze(
 
 const PORTAL_PATH = /^\/[^/]+\/(\d+)(?:\/|$)/;
 
-// { origin, portalId } for an app URL whose path starts /<segment>/<digits>, else null.
+// { origin, portalId } for an app page (not a sign-in page) whose path starts /<segment>/<digits>, else null.
 function portalContext(url, { base = DEFAULT_BASE_URL } = {}) {
-  if (!isAppOrigin(url, { base })) return null;
+  if (pageKind(url, { base }) !== 'app') return null;
   const { origin, pathname } = new URL(url);
   const match = pathname.match(PORTAL_PATH);
   return match ? { origin, portalId: match[1] } : null;
@@ -35,12 +35,13 @@ function resolve(routeId, context, { base = DEFAULT_BASE_URL } = {}) {
   return context.origin + route.path(context.portalId);
 }
 
-// The last portal context seen. A URL without a portal ID keeps the previous one.
+// The last portal context of the main frame. An app sign-in page clears it (signed out).
+// An outside page (mid sign-in) or an app page without a portal ID keeps the previous one.
 function portalTracker({ base = DEFAULT_BASE_URL } = {}) {
   let last = null;
   return {
     observe(url) {
-      last = portalContext(url, { base }) ?? last;
+      last = pageKind(url, { base }) === 'app-sign-in' ? null : portalContext(url, { base }) ?? last;
     },
     get context() {
       return last;

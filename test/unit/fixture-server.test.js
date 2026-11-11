@@ -35,6 +35,13 @@ test('fixture server imitates HubSpot URL shapes', async (t) => {
     assert.match(html, /contenteditable="true"/);
     assert.match(html, /<input id="text-input" type="text">/);
   });
+
+  await t.test('frame host embeds a same-origin frame that pushes another portal path', async () => {
+    const host = await (await fetch(`${fixture.url}/frame-host`)).text();
+    assert.match(host, /<iframe id="child-frame" src="\/frame-child"><\/iframe>/);
+    const child = await (await fetch(`${fixture.url}/frame-child`)).text();
+    assert.match(child, /history\.pushState\(\{\}, '', '\/contacts\/99\/objects\/0-1\/views\/all\/list'\)/);
+  });
 });
 
 test('fixture server imitates a sign-in flow through an identity provider', async (t) => {

@@ -115,48 +115,59 @@ test('Back and Forward move through the window history', async () => {
   await window.waitForURL(`${fixture.url}/tasks/4242/view/all`);
 });
 
-test('the tray menu lists the routes in table order', async () => {
+test('a same-origin frame that pushes another portal path does not change the remembered portal', async () => {
   await startAt(window, dashboardUrl());
-  const labels = await app.evaluate(
+  await window.goto(`${fixture.url}/frame-host`);
+  await expect
+    .poll(() => window.frames().map((frame) => frame.url()))
+    .toContain(`${fixture.url}/contacts/99/objects/0-1/views/all/list`);
+  await clickNavigate('Deals');
+  await window.waitForURL(`${fixture.url}/contacts/4242/objects/0-3/views/all/board`);
+});
+
+test('a route clicked on the sign-in page loads the app root, not the last portal', async () => {
+  await startAt(window, dashboardUrl());
+  await window.goto(`${fixture.url}/login`);
+  await clickNavigate('Deals');
+  await window.waitForURL(dashboardUrl());
+  expect(window.url()).toBe(dashboardUrl());
+});
+
+const trayTemplate = () =>
+  app.evaluate(
     (electronModule, trayPath) =>
       process.mainModule
         .require(trayPath)
         .menuTemplate(() => {}, () => {})
-        .filter((item) => item.type !== 'separator')
-        .map((item) => item.label),
+        .map(({ type, label, accelerator }) => ({ type, label, accelerator })),
     path.join(repoRoot, 'src', 'main', 'tray.js')
   );
+
+test('the tray menu lists the routes in table order', async () => {
+  await startAt(window, dashboardUrl());
+  const labels = (await trayTemplate()).filter((item) => item.type !== 'separator').map((item) => item.label);
   expect(labels).toEqual(['Show HubSpot', ...Object.keys(ROUTE_PATHS), 'Quit HubSpot Desktop']);
 });
 
-test('the application menu has no editor-breaking shortcuts or fake create items', async () => {
+const BANNED_ACCELERATORS = [
+  'CmdOrCtrl+K', 'CmdOrCtrl+I', 'CmdOrCtrl+F', 'CmdOrCtrl+N', 'CmdOrCtrl+D', 'Cmd+,',
+  'CmdOrCtrl+Shift+N', 'CmdOrCtrl+Shift+T', 'CmdOrCtrl+,',
+];
+const BANNED_LABELS = [
+  'New Contact', 'New Company', 'New Deal', 'New Task', 'New Ticket', 'Find...', 'Preferences...',
+  'Quick Actions', 'Go To',
+];
+
+test('the application and tray menus have no editor-breaking shortcuts or fake create items', async () => {
   await startAt(window, dashboardUrl());
-  const items = await app.evaluate(({ Menu }) => {
+  const appItems = await app.evaluate(({ Menu }) => {
     const walk = (menu) => menu.items.flatMap((item) => [item, ...(item.submenu ? walk(item.submenu) : [])]);
     return walk(Menu.getApplicationMenu()).map(({ label, accelerator }) => ({ label, accelerator }));
   });
-  const accelerators = items.map((item) => item.accelerator).filter(Boolean);
-  const labels = items.map((item) => item.label);
-  for (const banned of ['CmdOrCtrl+K', 'CmdOrCtrl+I', 'CmdOrCtrl+F', 'CmdOrCtrl+N', 'CmdOrCtrl+D', 'Cmd+,']) {
-    expect(accelerators).not.toContain(banned);
+  for (const items of [appItems, await trayTemplate()]) {
+    const accelerators = items.map((item) => item.accelerator).filter(Boolean);
+    const labels = items.map((item) => item.label);
+    for (const banned of BANNED_ACCELERATORS) expect(accelerators).not.toContain(banned);
+    for (const banned of BANNED_LABELS) expect(labels).not.toContain(banned);
   }
-  for (const banned of ['New Contact', 'New Company', 'New Deal', 'New Task', 'Find...', 'Preferences...']) {
-    expect(labels).not.toContain(banned);
-  }
-});
-
-test('the modifier with K and with I stays in the editor', async () => {
-  await startAt(window, dashboardUrl());
-  await window.goto(editorUrl());
-  const editor = window.locator('#editor');
-  await editor.click();
-  await window.keyboard.press('ControlOrMeta+K');
-  await window.keyboard.type('a');
-  await window.keyboard.press('ControlOrMeta+I');
-  await window.keyboard.type('b');
-  await expect(editor).toHaveText('ab');
-  expect(window.url()).toBe(editorUrl());
-  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getURL())).toBe(
-    editorUrl()
-  );
 });

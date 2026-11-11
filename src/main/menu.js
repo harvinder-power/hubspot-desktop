@@ -6,9 +6,11 @@ const { ROUTES, resolve, portalTracker } = require('./routes');
 function createRouteOpener(mainWindow, show) {
   const base = baseUrl();
   const portal = portalTracker({ base });
-  const observe = (event, url) => portal.observe(url);
-  mainWindow.webContents.on('did-navigate', observe);
-  mainWindow.webContents.on('did-navigate-in-page', observe);
+  // did-navigate fires for the main frame only; did-navigate-in-page fires for every frame.
+  mainWindow.webContents.on('did-navigate', (event, url) => portal.observe(url));
+  mainWindow.webContents.on('did-navigate-in-page', (event, url, isMainFrame) => {
+    if (isMainFrame) portal.observe(url);
+  });
   return (routeId) => {
     show();
     mainWindow.webContents.loadURL(resolve(routeId, portal.context, { base }));

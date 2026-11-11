@@ -82,6 +82,27 @@ test('portalContext returns null off the app origin or without a portal', () => 
   assert.equal(portalContext('not a url'), null);
 });
 
+test('portalContext ignores sign-in pages and accepts a portal path without a trailing slash', () => {
+  assert.equal(portalContext('https://app.hubspot.com/login/12345'), null);
+  assert.equal(portalContext('https://app.hubspot.com/sso/987'), null);
+  assert.deepEqual(portalContext('https://app.hubspot.com/contacts/111'), na);
+});
+
+test('portalTracker clears the portal on an app sign-in page', () => {
+  const tracker = portalTracker();
+  tracker.observe('https://app.hubspot.com/contacts/111/record/0-1/1');
+  tracker.observe('https://app.hubspot.com/login');
+  assert.equal(tracker.context, null);
+  assert.equal(resolve('deals', tracker.context), 'https://app.hubspot.com/');
+});
+
+test('portalTracker keeps the portal on an outside page during sign-in', () => {
+  const tracker = portalTracker();
+  tracker.observe('https://app.hubspot.com/contacts/111/record/0-1/1');
+  tracker.observe('https://idp.example.com/authorize?return_to=x');
+  assert.deepEqual(tracker.context, na);
+});
+
 test('portalTracker keeps the last portal across URLs without one', () => {
   const tracker = portalTracker({ base: dev });
   assert.equal(tracker.context, null);
