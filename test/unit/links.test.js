@@ -149,6 +149,7 @@ test('the rules table keeps its order', () => {
     'unparseable',
     'blob',
     'external-scheme',
+    'http-from-app',
     'unsafe-scheme',
     'app-origin',
     'navigate-from-non-app-page',
@@ -188,11 +189,29 @@ test('rule external-scheme: mail, phone and message links open externally', () =
 });
 
 test('rule unsafe-scheme: other schemes are refused from every page', () => {
-  for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'data:text/html,hi', 'vbscript:msgbox(1)', 'http://app.hubspot.com/']) {
-    assert.equal(decide({ url, currentUrl: RECORD, kind: 'navigate' }), 'deny', url);
-    assert.equal(decide({ url, currentUrl: LOGIN, kind: 'open' }), 'deny', url);
-    assert.equal(decide({ url, currentUrl: OKTA, kind: 'navigate' }), 'deny', url);
-    assert.equal(decide({ url, currentUrl: '', kind: 'navigate' }), 'deny', url);
+  for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'data:text/html,hi', 'vbscript:msgbox(1)', 'ftp://example.com/', 'zoommtg://join']) {
+    for (const currentUrl of [RECORD, LOGIN, OKTA, 'about:blank', '']) {
+      for (const kind of ['navigate', 'open']) assert.equal(decide({ url, currentUrl, kind }), 'deny', `${url} ${currentUrl} ${kind}`);
+    }
+  }
+});
+
+const HTTP_FORMS = ['http://example.com/x', 'HTTP://EXAMPLE.COM', 'http://user:pass@example.com/', 'http:example.com', 'http:///x', 'http://app.hubspot.com/contacts/1'];
+
+test('rule http-from-app: an http link from an app page or a blank popup opens externally', () => {
+  for (const url of HTTP_FORMS) {
+    for (const currentUrl of [RECORD, 'about:blank']) {
+      for (const kind of ['navigate', 'open']) assert.equal(decide({ url, currentUrl, kind }), 'external', `${url} ${currentUrl} ${kind}`);
+    }
+  }
+});
+
+test('rule unsafe-scheme: an http link is never loaded in a window and is refused during sign-in', () => {
+  assert.equal(isAppOrigin('http://app.hubspot.com/contacts/1'), false);
+  for (const url of HTTP_FORMS) {
+    for (const currentUrl of [LOGIN, OKTA, '']) {
+      for (const kind of ['navigate', 'open']) assert.equal(decide({ url, currentUrl, kind }), 'deny', `${url} ${currentUrl} ${kind}`);
+    }
   }
 });
 
@@ -251,7 +270,7 @@ test('a blank page reaches only app-origin and everything-else, and grants nothi
     [{ url: 'blob:https://evil.example/x', kind: 'open' }, 'deny'],
     [{ url: 'mailto:someone@example.com', kind: 'navigate' }, 'external'],
     [{ url: 'javascript:alert(1)', kind: 'navigate' }, 'deny'],
-    [{ url: 'http://evil.example/', kind: 'navigate' }, 'deny'],
+    [{ url: 'http://evil.example/', kind: 'navigate' }, 'external'],
   ];
   for (const [args, action] of expected) assert.equal(decide({ ...args, currentUrl: BLANK }), action, JSON.stringify(args));
 });

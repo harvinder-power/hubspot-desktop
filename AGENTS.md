@@ -24,7 +24,7 @@
 - `npm run check:chars` fails on invisible and bidirectional control characters in tracked text files. It prints file, line, column and code point.
 - Local `npm run test:e2e` is quiet by default: no shown window or child window, focus, dock icon, dock bounce, tray, notification or global shortcut. CI runs visible.
 - A quiet run denies the `notifications` permission, so Chromium shows no web notification. Tests of the tray module pass a stand-in `Tray` class.
-- `HUBSPOT_DESKTOP_QUIET=0 npm run test:e2e` forces a visible local run. Quiet runs skip fifteen tests: the thirteen tests in `native tab groups (CI only)`, the last-window-before-ready-to-show test and the hide-and-show test. They need visible windows.
+- `HUBSPOT_DESKTOP_QUIET=0 npm run test:e2e` forces a visible local run. Quiet runs skip eighteen tests: the sixteen tests in `native tab groups (CI only)`, the last-window-before-ready-to-show test and the hide-and-show test. They need visible windows.
 - Agents never force a visible local run without the coordinator's say.
 - `npm run fixture` serves the fixture on `http://127.0.0.1:4321` for manual checks.
 

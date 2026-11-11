@@ -103,6 +103,12 @@ test('external link opens externally and the app window stays on the fixture', a
   expect(await pageState(window)).toEqual(DASHBOARD_STATE());
 });
 
+test('http external link opens externally and the app window stays on the fixture', async () => {
+  await startAt(window, dashboardUrl());
+  expect(await clickAndCollectExternal(window, '#http-external-link')).toEqual(['http://example.com/x']);
+  expect(await pageState(window)).toEqual(DASHBOARD_STATE());
+});
+
 test('contact link navigates inside the app window', async () => {
   await startAt(window, dashboardUrl());
   await clickLink(window, '#contact-link');
