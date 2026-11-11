@@ -56,6 +56,12 @@ test('owners() follows pagination to the end', async (t) => {
   assert.deepEqual(api.requests.map((r) => r.path), ['/crm/owners/2026-09?limit=100', '/crm/owners/2026-09?limit=100&after=cursor-2']);
 });
 
+test('owners() stops after 10 pages even if HubSpot keeps sending a cursor', async (t) => {
+  const { api, client } = await setup(t, { 'GET /crm/owners/2026-09': { body: { results: [], paging: { next: { after: 'again' } } } } });
+  assert.deepEqual(await client.owners(), { ok: true, data: [] });
+  assert.equal(api.requests.length, 10);
+});
+
 test('tasksDue() sends the owner, open-status and due-date filters, soonest first', async (t) => {
   const { api, client } = await setup(t, {
     'POST /crm/objects/2026-09/tasks/search': {

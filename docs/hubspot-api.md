@@ -28,7 +28,7 @@ All paths use the date version `2026-09` on `https://api.hubapi.com`.
 - `https://api.hubapi.com` is the root for all APIs. Source: [overview](https://developers.hubspot.com/docs/api-reference/latest/overview). A region-specific API host is not documented. Unverified for EU portals.
 - `appOrigin` is `https://` plus the `uiDomain` field of the account details. The client accepts only `app.hubspot.com` or `app-<region>.hubspot.com`, else `null`. The docs give `app.hubspot.com` as the example. The `app-eu1.hubspot.com` value is unverified.
 - `portalId` comes from `portalId` (an integer in the spec). The client returns it as a string.
-- `owners()` asks for 100 per page (the documented default) and stops at 1,000 owners.
+- `owners()` asks for 100 per page (the documented default) and stops at 1,000 owners or 10 pages.
 - `tasksDue()` filters `hubspot_owner_id EQ`, `hs_task_status NEQ COMPLETED` and `hs_timestamp LTE before`, sorted by `hs_timestamp` ascending, limit 50. `hs_timestamp` is the due date. Source: [tasks guide](https://developers.hubspot.com/docs/api-reference/latest/crm/activities/tasks/guide.md).
 - `upcomingMeetings()` filters `hubspot_owner_id EQ` and `hs_meeting_start_time BETWEEN from and to`, sorted by start time ascending, limit 20. Source: [meetings guide](https://developers.hubspot.com/docs/api-reference/latest/crm/activities/meetings/guide.md).
 - Date filter values are Unix milliseconds as strings. The search guide shows this in an example only. Unverified as a rule.

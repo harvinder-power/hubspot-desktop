@@ -132,7 +132,9 @@ function createClient({ token, fetch = globalThis.fetch, baseUrl = 'https://api.
   async function owners() {
     const all = [];
     let after = null;
+    let pages = 0;
     do {
+      pages += 1;
       const query = new URLSearchParams({ limit: String(OWNERS_PAGE_SIZE) });
       if (after) query.set('after', after);
       const page = await request('GET', `/crm/owners/${API_VERSION}?${query}`);
@@ -144,7 +146,7 @@ function createClient({ token, fetch = globalThis.fetch, baseUrl = 'https://api.
         all.push({ id: o.id, email: str(o.email), name: name || str(o.email) || o.id });
       }
       after = str(page.data?.paging?.next?.after);
-    } while (after && all.length < MAX_OWNERS);
+    } while (after && all.length < MAX_OWNERS && pages < MAX_OWNERS / OWNERS_PAGE_SIZE);
     return ok(all.slice(0, MAX_OWNERS));
   }
 
