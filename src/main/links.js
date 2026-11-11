@@ -31,34 +31,62 @@ function isAppOrigin(urlOrOrigin, { base = DEFAULT_BASE_URL } = {}) {
   return url.hostname === 'app.hubspot.com' || REGION_HOST.test(url.hostname);
 }
 
-// The kind of the page a window has committed: 'none' (nothing yet), 'app-sign-in',
-// 'app', or 'outside' (every other URL, including about:blank, data: and error pages).
+// The kind of the page a window has committed: 'none' (nothing yet), 'blank' (about:blank, which
+// window.open('') and window.open('about:blank') commit), 'app-sign-in', 'app', or 'outside'
+// (every other URL, including data: and error pages).
 function pageKind(committedUrl, { base = DEFAULT_BASE_URL } = {}) {
   if (committedUrl === '') return 'none';
+  if (committedUrl === 'about:blank') return 'blank';
   if (!isAppOrigin(committedUrl, { base })) return 'outside';
   const { pathname } = parse(committedUrl);
   const signIn = SIGN_IN_PATHS.some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/'));
   return signIn ? 'app-sign-in' : 'app';
 }
 
+// The kind of a window a page opens, fixed from the URL it requests: 'app' for an app URL or a blank
+// page (which only an app page may open), else 'outside-popup'. Only an app window may join the tab group.
+function childWindowKind(requestedUrl, { base = DEFAULT_BASE_URL } = {}) {
+  const blank = requestedUrl === '' || requestedUrl === 'about:blank';
+  return blank || isAppOrigin(requestedUrl, { base }) ? 'app' : 'outside-popup';
+}
+
+// Page kinds a window may be tabbed on. A sign-in page counts: it is an app page the user signs in on.
+const TAB_PAGE_KINDS = ['app', 'app-sign-in'];
+
+// Whether a window may be in a native tab group, or host one, read from its committed state:
+// registry membership and the kind of the page it has committed. Every other window is separate.
+function tabEligible({ inRegistry, committedKind }) {
+  return inRegistry === true && TAB_PAGE_KINDS.includes(committedKind);
+}
+
 const isWebUrl = (url) => ['http:', 'https:'].includes(parse(url)?.protocol);
 
 // The window title for an outside page, host first. Null means the page owns its title.
-function lockedTitle(committedUrl, { base = DEFAULT_BASE_URL } = {}) {
-  if (pageKind(committedUrl, { base }) !== 'outside') return null;
+// A blank page owns its title only while it is the first document of a blank child the app opened
+// (`appOpenedBlank`, history entry 0), so the app can title a page it writes into.
+// Every other blank page is locked: an outside page can commit about:blank itself, also by location.replace.
+function lockedTitle(committedUrl, { base = DEFAULT_BASE_URL, activeIndex = 0, appOpenedBlank = false } = {}) {
+  const kind = pageKind(committedUrl, { base });
+  const ownBlank = kind === 'blank' && appOpenedBlank && activeIndex === 0;
+  if (kind !== 'outside' && (kind !== 'blank' || ownBlank)) return null;
   const url = parse(committedUrl);
   return `${url?.hostname || url?.protocol || 'unknown'} (external page)`;
 }
 
 // http: is only usable in dev runs whose override base is itself http, and only on that host.
+// 127.0.0.1 and localhost count as one host, so a test can show two outside hostnames.
+const LOOPBACK = ['127.0.0.1', 'localhost'];
+const sameDevHost = (a, b) => a === b || (LOOPBACK.includes(a) && LOOPBACK.includes(b));
 function isPermittedScheme(url, base) {
   if (url.protocol === 'https:') return true;
   const baseUrl = parse(base);
-  return url.protocol === 'http:' && baseUrl?.protocol === 'http:' && url.hostname === baseUrl.hostname;
+  return url.protocol === 'http:' && baseUrl?.protocol === 'http:' && sameDevHost(url.hostname, baseUrl.hostname);
 }
 
 // Ordered rules. decide() applies the first row whose test passes.
 // `page` is the kind of the page the asking window has committed.
+// Every page test is false for 'blank', so a blank page gets what a non-web outside page gets.
+// An outside page gains nothing by going blank: it is trusted no more, and the empty page has no script.
 const RULES = [
   {
     name: 'blank-popup-from-app',
@@ -96,4 +124,4 @@ function isPermissionAllowed(permission, origin, { base = DEFAULT_BASE_URL } = {
   return APP_PERMISSIONS.includes(permission) && isAppOrigin(origin, { base });
 }
 
-module.exports = { SIGN_IN_PATHS, isAppOrigin, pageKind, lockedTitle, decide, isPermissionAllowed, RULES };
+module.exports = { SIGN_IN_PATHS, isAppOrigin, pageKind, childWindowKind, tabEligible, lockedTitle, decide, isPermissionAllowed, RULES };

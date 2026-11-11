@@ -22,7 +22,7 @@
 - `npm run test:e2e` drives the real Electron app with Playwright against the fixture server.
 - `npm run build` builds the macOS app with electron-builder.
 - Local `npm run test:e2e` is quiet by default: no shown window or child window, focus, dock icon, dock bounce, tray or global shortcut. CI runs visible.
-- `HUBSPOT_DESKTOP_QUIET=0 npm run test:e2e` forces a visible local run. Quiet runs skip five tests: the three native tab-group runs, the hidden-window tab test and the hide-and-show test. They need visible windows.
+- `HUBSPOT_DESKTOP_QUIET=0 npm run test:e2e` forces a visible local run. Quiet runs skip fifteen tests: the thirteen tests in `native tab groups (CI only)`, the last-window-before-ready-to-show test and the hide-and-show test. They need visible windows.
 - Agents never force a visible local run without the coordinator's say.
 - `npm run fixture` serves the fixture on `http://127.0.0.1:4321` for manual checks.
 

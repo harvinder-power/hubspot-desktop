@@ -96,6 +96,15 @@ test('portalTracker clears the portal on an app sign-in page', () => {
   assert.equal(resolve('deals', tracker.context), 'https://app.hubspot.com/');
 });
 
+test('portalTracker keeps the portal on a sign-in page in a window a page opened', () => {
+  const tracker = portalTracker();
+  tracker.observe('https://app.hubspot.com/contacts/111/record/0-1/1');
+  tracker.observe('https://app.hubspot.com/login', { pageOpened: true });
+  assert.deepEqual(tracker.context, na);
+  tracker.observe('https://app.hubspot.com/login', { pageOpened: false });
+  assert.equal(tracker.context, null);
+});
+
 test('portalTracker keeps the portal on an outside page during sign-in', () => {
   const tracker = portalTracker();
   tracker.observe('https://app.hubspot.com/contacts/111/record/0-1/1');
