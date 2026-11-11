@@ -21,6 +21,9 @@
 - `npm test` runs the unit tests (`node --test test/unit/*.test.js`).
 - `npm run test:e2e` drives the real Electron app with Playwright against the fixture server.
 - `npm run build` builds the macOS app with electron-builder.
+- Local `npm run test:e2e` is quiet by default: no shown window, focus, dock icon, tray or global shortcut. CI runs visible.
+- `HUBSPOT_DESKTOP_QUIET=0 npm run test:e2e` forces a visible local run. Quiet runs skip the four tests that need a visible window.
+- Agents never force a visible local run without the coordinator's say.
 - `npm run fixture` serves the fixture on `http://127.0.0.1:4321` for manual checks.
 
 ## Fixture and overrides

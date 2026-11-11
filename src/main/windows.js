@@ -5,7 +5,8 @@ const windowStateKeeper = require('electron-window-state');
 const TABBING_IDENTIFIER = 'hubspot-desktop';
 
 // The app windows. The set is the only state, kept in focus order: the last entry was focused last.
-function createWindowRegistry({ partition, preloadPath, base, secure }) {
+// quiet: windows are never shown or focused, so a local test run cannot take focus.
+function createWindowRegistry({ partition, preloadPath, base, secure, quiet = false }) {
   const windows = new Set();
   const listeners = [];
   const isMac = process.platform === 'darwin';
@@ -60,6 +61,7 @@ function createWindowRegistry({ partition, preloadPath, base, secure }) {
     });
     win.on('closed', () => windows.delete(win));
     win.once('ready-to-show', () => {
+      if (quiet) return;
       win.show();
       if (state?.isMaximized) win.maximize();
     });
@@ -73,6 +75,7 @@ function createWindowRegistry({ partition, preloadPath, base, secure }) {
   function show() {
     const win = active();
     if (!win) return open();
+    if (quiet) return win;
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();

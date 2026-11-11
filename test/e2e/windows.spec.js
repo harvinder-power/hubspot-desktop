@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const path = require('node:path');
 const fixtureServer = require('../fixture/server');
-const { evidenceDir, launchApp, startAt } = require('./helpers');
+const { evidenceDir, quiet, launchApp, startAt } = require('./helpers');
 
 const isMac = process.platform === 'darwin';
 
@@ -28,7 +28,9 @@ const clickMenu = (menuLabel, itemLabel) =>
 const windowInfo = () =>
   app.evaluate(({ app: electronApp, BrowserWindow }) => {
     const sandboxed = new Map(electronApp.getAppMetrics().map((m) => [m.pid, m.sandboxed]));
+    // A window that is closing can still be listed for a moment after its contents are destroyed.
     return BrowserWindow.getAllWindows()
+      .filter((w) => !w.isDestroyed() && !w.webContents.isDestroyed())
       .sort((a, b) => a.id - b.id)
       .map((w) => ({
         url: w.webContents.getURL(),
@@ -41,8 +43,23 @@ const windowInfo = () =>
       }));
   });
 
-const focusWindow = (index) =>
-  app.evaluate(({ BrowserWindow }, i) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[i].focus(), index);
+// Visible runs focus the window for real: the app must be frontmost, so steal it, then wait for focus.
+// Quiet runs never focus. They send the window's focus event, which is what the registry records,
+// and check that no window holds OS focus, so the registry falls back to that record.
+async function focusWindow(index) {
+  const id = await app.evaluate(({ app: electronApp, BrowserWindow }, [i, isQuiet]) => {
+    const win = BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[i];
+    if (isQuiet) {
+      win.emit('focus');
+    } else {
+      electronApp.focus({ steal: true });
+      win.focus();
+    }
+    return win.id;
+  }, [index, quiet]);
+  const focused = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.id ?? null);
+  await expect.poll(focused).toBe(quiet ? null : id);
+}
 
 async function newTab() {
   const [page] = await Promise.all([app.waitForEvent('window'), clickMenu('File', 'New Tab')]);
@@ -69,29 +86,34 @@ test.afterEach(async () => {
   if (userData) fs.rmSync(userData, { recursive: true, force: true });
 });
 
-test('File > New Tab opens a second window in the same native tab group', async () => {
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setPosition(40, 60));
+test('File > New Tab opens a second registry window on the dashboard with the shared tab identifier', async () => {
   await newTab();
   const windows = await windowInfo();
-  console.log(`3a after New Tab: ${JSON.stringify(windows.map(({ url, tabbingIdentifier, bounds, visible }) => ({ url, tabbingIdentifier, bounds, visible })))}`);
+  console.log(`3a after New Tab: ${JSON.stringify(windows.map(({ url, tabbingIdentifier }) => ({ url, tabbingIdentifier })))}`);
   expect(windows.map((w) => w.url)).toEqual([dashboardUrl(), dashboardUrl()]);
-  if (isMac) {
-    expect(windows.map((w) => w.tabbingIdentifier)).toEqual(['hubspot-desktop', 'hubspot-desktop']);
-    // A tab takes the frame of its group. A separate window would open centred.
-    expect(windows[1].bounds).toEqual(windows[0].bounds);
-  }
-  fs.mkdirSync(evidenceDir, { recursive: true });
-  await (await app.windows())[1].screenshot({ path: path.join(evidenceDir, 'new-tab.png') });
+  if (isMac) expect(windows.map((w) => w.tabbingIdentifier)).toEqual(['hubspot-desktop', 'hubspot-desktop']);
 });
 
-test('File > New Window opens a separate window, and Cmd+N belongs to New Window only', async () => {
+test('on macOS New Tab joins the native tab group and New Window does not', async () => {
+  test.skip(quiet || !isMac, 'needs visible macOS windows; runs in CI');
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setPosition(40, 60));
+  await newTab();
   const [page] = await Promise.all([app.waitForEvent('window'), clickMenu('File', 'New Window')]);
   await page.waitForURL(dashboardUrl());
   const windows = await windowInfo();
-  console.log(`3a after New Window: ${JSON.stringify(windows.map(({ tabbingIdentifier, bounds }) => ({ tabbingIdentifier, bounds })))}`);
-  expect(windows).toHaveLength(2);
-  if (isMac) expect(windows[1].bounds).not.toEqual(windows[0].bounds);
+  console.log(`3a after New Tab then New Window: ${JSON.stringify(windows.map(({ tabbingIdentifier, bounds, visible }) => ({ tabbingIdentifier, bounds, visible })))}`);
+  // A tab takes the frame of its group. A separate window opens centred.
+  expect(windows[1].bounds).toEqual(windows[0].bounds);
+  expect(windows[2].bounds).not.toEqual(windows[0].bounds);
+  expect(windows.map((w) => w.visible)).toEqual([true, true, true]);
+  fs.mkdirSync(evidenceDir, { recursive: true });
+  await page.screenshot({ path: path.join(evidenceDir, 'new-window.png') });
+});
+
+test('File > New Window opens a second window, and Cmd+T and Cmd+N belong to New Tab and New Window only', async () => {
+  const [page] = await Promise.all([app.waitForEvent('window'), clickMenu('File', 'New Window')]);
+  await page.waitForURL(dashboardUrl());
+  expect(await windowInfo()).toHaveLength(2);
 
   const owners = await app.evaluate(({ Menu }) => {
     const walk = (menu) => menu.items.flatMap((item) => [item, ...(item.submenu ? walk(item.submenu) : [])]);
@@ -144,6 +166,7 @@ test('Back acts on the focused window only', async () => {
 });
 
 test('closing a tab leaves one window; on macOS the last window hides and Show brings it back', async () => {
+  test.skip(quiet, 'needs a visible window; runs in CI');
   await newTab();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[1].close());
   await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true]);
@@ -169,4 +192,23 @@ test('New Tab opens the dashboard of the portal learned in the first window', as
   });
   await newTab();
   expect(await app.evaluate(() => globalThis.startedUrls)).toEqual([dashboardUrl()]);
+});
+
+test('quiet mode shows no window and creates no tray or global shortcut', async () => {
+  const { electronApp, dir } = await launchApp(fixture.url, { quiet: true });
+  try {
+    await (await electronApp.firstWindow()).waitForURL(dashboardUrl());
+    const state = await electronApp.evaluate(({ BrowserWindow, globalShortcut }) => ({
+      windows: BrowserWindow.getAllWindows().length,
+      noneVisible: BrowserWindow.getAllWindows().every((w) => !w.isVisible()),
+      // main.js requires tray.js only when it creates the tray.
+      trayLoaded: Object.keys(process.mainModule.constructor._cache).some((file) => file.endsWith('tray.js')),
+      shortcut: globalShortcut.isRegistered('CommandOrControl+Shift+H'),
+    }));
+    console.log(`quiet launch: ${JSON.stringify(state)}`);
+    expect(state).toEqual({ windows: 1, noneVisible: true, trayLoaded: false, shortcut: false });
+  } finally {
+    await electronApp.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

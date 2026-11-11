@@ -5,7 +5,6 @@ const path = require('path');
 const { createMenu, createRouteOpener } = require('./menu');
 const NotificationManager = require('./notifications');
 const DockManager = require('./dock');
-const TrayManager = require('./tray');
 const { createWindowRegistry } = require('./windows');
 const { PARTITION, setupSecurity } = require('./window-security');
 const { baseUrl } = require('./base-url');
@@ -23,6 +22,10 @@ let trayManager;
 if (!app.isPackaged && process.env.HUBSPOT_DESKTOP_USER_DATA) {
   app.setPath('userData', process.env.HUBSPOT_DESKTOP_USER_DATA);
 }
+
+// Quiet mode for local test runs: no shown window, no focus, no dock icon, menu bar, tray or global shortcut.
+const QUIET = !app.isPackaged && process.env.HUBSPOT_DESKTOP_QUIET === '1';
+if (QUIET && process.platform === 'darwin') app.setActivationPolicy('accessory');
 
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
@@ -47,6 +50,7 @@ app.whenReady().then(async () => {
     preloadPath: path.join(__dirname, '../preload/preload.js'),
     base: baseUrl(),
     secure: setupSecurity,
+    quiet: QUIET,
   });
   const routes = createRouteOpener(registry);
   const newTab = () => registry.open({ url: routes.url('dashboards') });
@@ -55,18 +59,23 @@ app.whenReady().then(async () => {
 
   notificationManager = new NotificationManager(registry);
   dockManager = new DockManager();
-  trayManager = new TrayManager(registry, routes.open);
   createMenu({ registry, openRoute: routes.open, newTab, newWindow });
 
-  // Register global shortcut (Cmd+Shift+H to show/hide)
-  globalShortcut.register(GLOBAL_SHORTCUT, () => {
-    const win = registry.active();
-    if (win?.isVisible() && win.isFocused()) {
-      win.hide();
-    } else {
-      registry.show();
-    }
-  });
+  if (!QUIET) {
+    // Required here only, so a quiet run never loads the tray module.
+    const TrayManager = require('./tray');
+    trayManager = new TrayManager(registry, routes.open);
+
+    // Register global shortcut (Cmd+Shift+H to show/hide)
+    globalShortcut.register(GLOBAL_SHORTCUT, () => {
+      const win = registry.active();
+      if (win?.isVisible() && win.isFocused()) {
+        win.hide();
+      } else {
+        registry.show();
+      }
+    });
+  }
 
   registry.open();
 

@@ -113,6 +113,7 @@ test('contact link navigates inside the app window', async () => {
 });
 
 test('target=_blank link opens a second app window that keeps the link policy', async () => {
+  test.skip(helpers.quiet, 'opens a visible child window; runs in CI');
   await startAt(window, dashboardUrl());
   const [popup] = await Promise.all([app.waitForEvent('window'), window.click('#blank-link')]);
   const listUrl = `${fixture.url}/contacts/4242/objects/0-1/views/all/list`;
@@ -318,6 +319,7 @@ test('preload IPC works from the app origin only', async () => {
 });
 
 test('a sign-in popup opens a second app window with the locked title', async () => {
+  test.skip(helpers.quiet, 'opens a visible child window; runs in CI');
   await startAt(window, loginUrl());
   const [popup] = await Promise.all([
     app.waitForEvent('window'),

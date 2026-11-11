@@ -6,12 +6,20 @@ const path = require('node:path');
 const repoRoot = path.join(__dirname, '..', '..');
 const evidenceDir = process.env.EVIDENCE_DIR || path.join(repoRoot, 'test-results', 'evidence');
 
+// Local runs are quiet (no shown window, no focus) unless HUBSPOT_DESKTOP_QUIET=0. CI runs visible.
+const quiet = (process.env.HUBSPOT_DESKTOP_QUIET ?? (process.env.CI ? '0' : '1')) === '1';
+
 // Launches the app against `baseUrl` with its own user-data directory and a stubbed shell.openExternal.
-async function launchApp(baseUrl) {
+async function launchApp(baseUrl, { quiet: launchQuiet = quiet } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubspot-desktop-e2e-'));
   const electronApp = await electron.launch({
     args: [repoRoot],
-    env: { ...process.env, HUBSPOT_DESKTOP_BASE_URL: baseUrl, HUBSPOT_DESKTOP_USER_DATA: dir },
+    env: {
+      ...process.env,
+      HUBSPOT_DESKTOP_BASE_URL: baseUrl,
+      HUBSPOT_DESKTOP_USER_DATA: dir,
+      HUBSPOT_DESKTOP_QUIET: launchQuiet ? '1' : '0',
+    },
   });
   await electronApp.evaluate(({ shell }) => {
     globalThis.openedExternally = [];
@@ -28,4 +36,4 @@ async function startAt(electronApp, page, url) {
   await electronApp.evaluate(() => { globalThis.openedExternally = []; });
 }
 
-module.exports = { repoRoot, evidenceDir, launchApp, startAt };
+module.exports = { repoRoot, evidenceDir, quiet, launchApp, startAt };
