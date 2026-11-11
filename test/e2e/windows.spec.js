@@ -96,16 +96,17 @@ test('File > New Tab opens a second registry window on the dashboard with the sh
 
 test('on macOS New Tab joins the native tab group and New Window does not', async () => {
   test.skip(quiet || !isMac, 'needs visible macOS windows; runs in CI');
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setPosition(40, 60));
+  // The minimum window size fits the CI screen (1024 wide), so macOS does not move the frame.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 40, y: 60, width: 800, height: 600 }));
   await newTab();
   const [page] = await Promise.all([app.waitForEvent('window'), clickMenu('File', 'New Window')]);
   await page.waitForURL(dashboardUrl());
+  await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true, true]);
   const windows = await windowInfo();
   console.log(`3a after New Tab then New Window: ${JSON.stringify(windows.map(({ tabbingIdentifier, bounds, visible }) => ({ tabbingIdentifier, bounds, visible })))}`);
-  // A tab takes the frame of its group. A separate window opens centred.
+  // A tab takes the frame of its group. A separate window keeps its own default frame.
   expect(windows[1].bounds).toEqual(windows[0].bounds);
   expect(windows[2].bounds).not.toEqual(windows[0].bounds);
-  expect(windows.map((w) => w.visible)).toEqual([true, true, true]);
   fs.mkdirSync(evidenceDir, { recursive: true });
   await page.screenshot({ path: path.join(evidenceDir, 'new-window.png') });
 });
