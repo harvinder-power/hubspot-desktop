@@ -2,10 +2,6 @@
 // Pure module. It must not require electron, so node --test can load it.
 const { DEFAULT_BASE_URL } = require('./base-url');
 
-// Each window is in one mode. It starts in 'app'. It enters 'signin' when an app sign-in
-// page sends it to another origin, and leaves 'signin' when it reaches an app origin again.
-const MODE = { app: 'app', signin: 'signin' };
-
 const REGION_HOST = /^app-[a-z]{2}[0-9]+\.hubspot\.com$/;
 // Unverified: nobody has yet checked these against HubSpot's real sign-in pages.
 const SIGN_IN_PATHS = ['/login', '/sso'];
@@ -35,10 +31,23 @@ function isAppOrigin(urlOrOrigin, { base = DEFAULT_BASE_URL } = {}) {
   return url.hostname === 'app.hubspot.com' || REGION_HOST.test(url.hostname);
 }
 
-function isSignInPage(currentUrl, base) {
-  if (!isAppOrigin(currentUrl, { base })) return false;
-  const { pathname } = parse(currentUrl);
-  return SIGN_IN_PATHS.some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/'));
+// The kind of the page a window has committed: 'none' (nothing yet), 'app-sign-in',
+// 'app', or 'outside' (every other URL, including about:blank, data: and error pages).
+function pageKind(committedUrl, { base = DEFAULT_BASE_URL } = {}) {
+  if (committedUrl === '') return 'none';
+  if (!isAppOrigin(committedUrl, { base })) return 'outside';
+  const { pathname } = parse(committedUrl);
+  const signIn = SIGN_IN_PATHS.some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/'));
+  return signIn ? 'app-sign-in' : 'app';
+}
+
+const isWebUrl = (url) => ['http:', 'https:'].includes(parse(url)?.protocol);
+
+// The window title for an outside page, host first. Null means the page owns its title.
+function lockedTitle(committedUrl, { base = DEFAULT_BASE_URL } = {}) {
+  if (pageKind(committedUrl, { base }) !== 'outside') return null;
+  const url = parse(committedUrl);
+  return `${url?.hostname || url?.protocol || 'unknown'} (external page)`;
 }
 
 // http: is only usable in dev runs whose override base is itself http, and only on that host.
@@ -49,15 +58,13 @@ function isPermittedScheme(url, base) {
 }
 
 // Ordered rules. decide() applies the first row whose test passes.
-// `mode` is the mode after the decision; a row without `mode` leaves it unchanged.
-// For kind 'open', an allowed row's mode is the mode the new child window starts in.
+// `page` is the kind of the page the asking window has committed.
 const RULES = [
   {
     name: 'blank-popup-from-app',
-    test: ({ url, kind, currentUrl, base }) =>
-      kind === 'open' && (url === '' || url === 'about:blank') && isAppOrigin(currentUrl, { base }),
+    test: ({ url, kind, page }) =>
+      kind === 'open' && (url === '' || url === 'about:blank') && (page === 'app' || page === 'app-sign-in'),
     action: 'allow',
-    mode: MODE.app,
   },
   { name: 'unparseable', test: ({ target }) => !target, action: 'deny' },
   {
@@ -67,30 +74,26 @@ const RULES = [
   },
   { name: 'external-scheme', test: ({ target }) => EXTERNAL_SCHEMES.includes(target.protocol), action: 'external' },
   { name: 'unsafe-scheme', test: ({ target, base }) => !isPermittedScheme(target, base), action: 'deny' },
-  { name: 'app-origin', test: ({ target, base }) => isAppOrigin(target.href, { base }), action: 'allow', mode: MODE.app },
+  { name: 'app-origin', test: ({ target, base }) => isAppOrigin(target.href, { base }), action: 'allow' },
   {
-    name: 'enter-sign-in',
-    test: ({ mode, currentUrl, base }) => mode === MODE.app && isSignInPage(currentUrl, base),
-    action: 'allow',
-    mode: MODE.signin,
-  },
-  {
-    name: 'continue-sign-in',
-    test: ({ mode, kind }) => mode === MODE.signin && kind === 'navigate',
+    name: 'navigate-from-non-app-page',
+    test: ({ kind, page, currentUrl }) =>
+      kind === 'navigate' && (page === 'none' || page === 'app-sign-in' || (page === 'outside' && isWebUrl(currentUrl))),
     action: 'allow',
   },
+  { name: 'sign-in-popup', test: ({ kind, page }) => kind === 'open' && page === 'app-sign-in', action: 'allow' },
   { name: 'everything-else', test: () => true, action: 'external' },
 ];
 
-function decide({ url, currentUrl, mode = MODE.app, kind, base = DEFAULT_BASE_URL }) {
-  const context = { url, target: parse(url), currentUrl, mode, kind, base };
+// Returns 'allow', 'external' or 'deny'. `currentUrl` is the committed URL of the asking window.
+function decide({ url, currentUrl, kind, base = DEFAULT_BASE_URL }) {
+  const context = { url, target: parse(url), currentUrl, page: pageKind(currentUrl, { base }), kind, base };
   const rule = RULES.find((row) => row.test(context));
-  const action = typeof rule.action === 'function' ? rule.action(context) : rule.action;
-  return { action, mode: rule.mode ?? mode };
+  return typeof rule.action === 'function' ? rule.action(context) : rule.action;
 }
 
 function isPermissionAllowed(permission, origin, { base = DEFAULT_BASE_URL } = {}) {
   return APP_PERMISSIONS.includes(permission) && isAppOrigin(origin, { base });
 }
 
-module.exports = { MODE, SIGN_IN_PATHS, isAppOrigin, decide, isPermissionAllowed, RULES };
+module.exports = { SIGN_IN_PATHS, isAppOrigin, pageKind, lockedTitle, decide, isPermissionAllowed, RULES };
