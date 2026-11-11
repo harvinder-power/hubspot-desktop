@@ -9,6 +9,7 @@ const { createWindowRegistry } = require('./windows');
 const { PARTITION, setupSecurity } = require('./window-security');
 const { baseUrl } = require('./base-url');
 const { isPermissionAllowed } = require('./links');
+const { attach: attachContextMenu, createActions } = require('./context-menu');
 
 // Constants
 const GLOBAL_SHORTCUT = 'CommandOrControl+Shift+H';
@@ -56,6 +57,9 @@ app.whenReady().then(async () => {
   const newTab = () => registry.open({ url: routes.url('dashboards') });
   const newWindow = () => registry.open({ url: routes.url('dashboards'), tab: false });
   registry.onWindow((win) => win.on('new-window-for-tab', newTab));
+  // Every window's contents, registry windows and window.open children alike, get the right-click menu.
+  const contextActions = createActions({ openTab: (url) => registry.open({ url }) });
+  app.on('web-contents-created', (event, contents) => contents.getType() === 'window' && attachContextMenu(contents, contextActions));
 
   notificationManager = new NotificationManager(registry, { quiet: QUIET });
   dockManager = new DockManager();
