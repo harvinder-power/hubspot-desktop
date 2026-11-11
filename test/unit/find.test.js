@@ -45,6 +45,11 @@ const CASES = [
   ['open, none: close stops', openNone, { type: 'close' }, { ...openNone, open: false }, STOP],
   ['open, none: result with matches sets the counts', openNone, { type: 'result', active: 1, total: 2 }, { ...openNone, active: 1, total: 2 }, null],
 
+  ['closed: navigated does nothing', closedWithQuery, { type: 'navigated' }, closedWithQuery, null],
+  ['open, empty: navigated does nothing', openEmpty, { type: 'navigated' }, openEmpty, null],
+  ['open, found: navigated searches the query again in a new session', openFound, { type: 'navigated' }, openFound, find('deal', true, true)],
+  ['open, none: navigated searches the query again', openNone, { type: 'navigated' }, openNone, find('zzz', true, true)],
+
   ['unknown event does nothing', openFound, { type: 'reload' }, openFound, null],
 ];
 

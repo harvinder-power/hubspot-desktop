@@ -77,6 +77,33 @@ test('the Edit menu lists Find, Find Next and Find Previous', async () => {
   expect(items).toEqual([['Find...', 'CmdOrCtrl+F'], ['Find Next', 'CmdOrCtrl+G'], ['Find Previous', 'CmdOrCtrl+Shift+G']]);
 });
 
+test('Cmd+F, Cmd+G and Shift+Cmd+G belong to the three find items only', async () => {
+  const owners = await app.evaluate(({ Menu }) => {
+    const walk = (menu) => menu.items.flatMap((item) => [item, ...(item.submenu ? walk(item.submenu) : [])]);
+    return walk(Menu.getApplicationMenu())
+      .filter((item) => ['CmdOrCtrl+F', 'CmdOrCtrl+G', 'CmdOrCtrl+Shift+G'].includes(item.accelerator))
+      .map(({ label, accelerator }) => [label, accelerator]);
+  });
+  expect(owners).toEqual([['Find...', 'CmdOrCtrl+F'], ['Find Next', 'CmdOrCtrl+G'], ['Find Previous', 'CmdOrCtrl+Shift+G']]);
+});
+
+test('a page navigation while the bar is open searches the new page again', async () => {
+  await clickEdit('Find...');
+  const bar = await findBar();
+  await bar.fill('#query', 'record');
+  await expect(bar.locator('#count')).toHaveText('1 of 2');
+  // The editor page has no "record".
+  await window.goto(`${fixture.url}/editor`);
+  await expect(bar.locator('#count')).toHaveText('No results');
+  await window.goto(dashboardUrl());
+  await expect(bar.locator('#count')).toHaveText('1 of 2');
+  await bar.press('#query', 'Escape');
+  await expect.poll(async () => (await layout()).children).toEqual([]);
+  await app.evaluate(() => {
+    globalThis.stopCalls = [];
+  });
+});
+
 test('find bar: open, count, step, no results, close', async () => {
   await clickEdit('Find...');
   const { width, height, children } = await layout();

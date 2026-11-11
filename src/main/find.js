@@ -1,5 +1,5 @@
 // Find in page. reduce() is pure and must not require electron, so node --test can load it.
-// State: { open, query, active, total }. Events: { type: 'open' | 'close' | 'next' | 'previous' },
+// State: { open, query, active, total }. Events: { type: 'open' | 'close' | 'next' | 'previous' | 'navigated' },
 // { type: 'query', text } and { type: 'result', active, total }.
 // reduce returns { state, effect }. effect is { find: { text, forward, findNext } }, { stop: true } or null.
 // findNext follows Electron: true starts a new search session, false steps through the current one.
@@ -35,6 +35,8 @@ function reduce(state, event) {
     case 'next':
     case 'previous':
       return state.open && state.query ? { state, effect: search(state.query, event.type === 'next', false) } : same;
+    case 'navigated':
+      return state.open && state.query ? { state, effect: search(state.query, true, true) } : same;
     case 'result':
       return state.open && state.query ? { state: { ...state, active: event.active, total: event.total }, effect: null } : same;
     default:
@@ -111,6 +113,9 @@ function createBar(win, bars) {
   page.on('found-in-page', (event, result) => {
     if (result.requestId === request) dispatch({ type: 'result', active: result.activeMatchOrdinal, total: result.matches });
   });
+  // A new page in the main frame makes the counts stale, so the search runs again.
+  page.on('did-navigate', () => dispatch({ type: 'navigated' }));
+  page.on('did-navigate-in-page', (event, url, isMainFrame) => isMainFrame && dispatch({ type: 'navigated' }));
   win.on('resize', () => state.open && place());
   win.on('closed', () => {
     bars.delete(contents);
