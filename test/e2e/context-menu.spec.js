@@ -143,11 +143,16 @@ test('a menu item clicked after its window is destroyed does nothing and does no
   await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(2);
 
   expectItems(await rightClick('h1'), PAGE_ITEMS);
-  const result = await app.evaluate(({ BrowserWindow }) => {
-    const reload = globalThis.templates.at(-1).find((item) => item.label === 'Reload');
-    BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[0].destroy();
+  await app.evaluate(({ BrowserWindow }) => {
+    globalThis.staleReload = globalThis.templates.at(-1).find((item) => item.label === 'Reload');
+    const [first] = BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id);
+    globalThis.staleContents = first.webContents;
+    first.destroy();
+  });
+  await expect.poll(() => app.evaluate(() => globalThis.staleContents.isDestroyed())).toBe(true);
+  const result = await app.evaluate(() => {
     try {
-      reload.click();
+      globalThis.staleReload.click();
       return 'no throw';
     } catch (error) {
       return error.message;
