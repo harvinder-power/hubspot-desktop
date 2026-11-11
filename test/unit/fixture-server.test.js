@@ -36,3 +36,18 @@ test('fixture server imitates HubSpot URL shapes', async (t) => {
     assert.match(html, /<input id="text-input" type="text">/);
   });
 });
+
+test('fixture server imitates a sign-in flow through an identity provider', async (t) => {
+  const idp = await start(0);
+  const app = await start(0, { portalId: '4242', idpOrigin: idp.url });
+  t.after(() => Promise.all([idp.close(), app.close()]));
+  const href = (html, id) => html.match(new RegExp(`id="${id}" href="([^"]*)"`))[1].replace(/&amp;/g, '&');
+
+  const login = await (await fetch(`${app.url}/login`)).text();
+  const idpUrl = href(login, 'idp-link');
+  const returnTo = `${app.url}/reports-dashboard/4242`;
+  assert.equal(idpUrl, `${idp.url}/idp/authorize?return_to=${encodeURIComponent(returnTo)}`);
+
+  const provider = await (await fetch(idpUrl)).text();
+  assert.equal(href(provider, 'return-link'), returnTo);
+});

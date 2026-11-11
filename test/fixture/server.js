@@ -36,8 +36,23 @@ function editorPage() {
 <input id="text-input" type="text">`);
 }
 
-function handle(req, res, portalId) {
-  const { pathname } = new URL(req.url, 'http://fixture');
+// Sign-in page. Links to an identity provider on another origin, as SSO does.
+function loginPage(idpOrigin, returnTo) {
+  const href = `${idpOrigin}/idp/authorize?return_to=${encodeURIComponent(returnTo)}`;
+  return page('Log in', `
+<h1>Log in</h1>
+<a id="idp-link" href="${escapeHtml(href)}">Sign in with your identity provider</a>`);
+}
+
+// Identity provider page. Links back to the return_to URL, as a completed sign-in does.
+function idpPage(returnTo) {
+  return page('Identity provider', `
+<h1>Identity provider</h1>
+<a id="return-link" href="${escapeHtml(returnTo)}">Continue to HubSpot</a>`);
+}
+
+function handle(req, res, portalId, idpOrigin) {
+  const { pathname, searchParams } = new URL(req.url, 'http://fixture');
   if (pathname === '/') {
     res.writeHead(302, { Location: `/reports-dashboard/${portalId}` });
     return res.end();
@@ -46,13 +61,15 @@ function handle(req, res, portalId) {
   let html;
   if (title) html = page(`(${title[1]}) Inbox`, `<h1>(${title[1]}) Inbox</h1>`);
   else if (pathname === '/editor') html = editorPage();
+  else if (pathname === '/login') html = loginPage(idpOrigin, `http://${req.headers.host}/reports-dashboard/${portalId}`);
+  else if (pathname === '/idp/authorize') html = idpPage(searchParams.get('return_to') || '/');
   else html = hubPage(pathname, portalId);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
 }
 
-function start(port = 0, { portalId = '111' } = {}) {
-  const server = http.createServer((req, res) => handle(req, res, portalId));
+function start(port = 0, { portalId = '111', idpOrigin = '' } = {}) {
+  const server = http.createServer((req, res) => handle(req, res, portalId, idpOrigin));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, '127.0.0.1', () => {
