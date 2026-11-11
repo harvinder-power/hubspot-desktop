@@ -10,6 +10,7 @@ const { evidenceDir, quiet, repoRoot, launchApp, startAt } = require('./helpers'
 const isMac = process.platform === 'darwin';
 
 let fixture;
+let idp;
 let app;
 let userData;
 let first;
@@ -76,12 +77,30 @@ async function newTab() {
   return page;
 }
 
+// A target=_blank child of the first window, on the contacts list.
+async function blankLinkChild() {
+  const [child] = await Promise.all([app.waitForEvent('window'), first.evaluate(() => document.querySelector('#blank-link').click())]);
+  await child.waitForURL(contactsUrl());
+  return child;
+}
+
+// A sign-in popup from the app's /login page to the identity provider.
+async function signInPopup() {
+  await startAt(app, first, `${fixture.url}/login`);
+  const idpUrl = `${idp.url}/idp/authorize`;
+  const [popup] = await Promise.all([app.waitForEvent('window'), first.evaluate((url) => { window.open(url); }, idpUrl)]);
+  await popup.waitForURL(idpUrl);
+  return popup;
+}
+
 test.beforeAll(async () => {
-  fixture = await fixtureServer.start(0, { portalId: '4242' });
+  idp = await fixtureServer.start(0);
+  fixture = await fixtureServer.start(0, { portalId: '4242', idpOrigin: idp.url });
 });
 
 test.afterAll(async () => {
   await fixture?.close();
+  await idp?.close();
 });
 
 test.beforeEach(async () => {
@@ -153,6 +172,64 @@ test.describe('native tab groups (CI only)', () => {
     await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true]);
     await expect.poll(onScreen).toEqual([true]);
   });
+
+  test('a target=_blank child of an app page joins its opener tab group', async () => {
+    await blankLinkChild();
+    await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true]);
+    await expect.poll(onScreen).toEqual([false, true]);
+  });
+
+  test('a sign-in popup to an outside origin stays a separate window', async () => {
+    await signInPopup();
+    await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true]);
+    await expect.poll(onScreen).toEqual([true, true]);
+  });
+});
+
+test('a window that page opened is a registry window: menus, the + button and the portal tracker cover it', async () => {
+  const child = await blankLinkChild();
+  const otherPortal = `${fixture.url}/contacts/5555/objects/0-1/views/all/list`;
+  await child.goto(otherPortal);
+  await focusWindow(1);
+  await clickMenu('Navigate', 'Deals');
+  await child.waitForURL(`${fixture.url}/contacts/5555/objects/0-3/views/all/board`);
+  await clickMenu('Navigate', 'Back');
+  await child.waitForURL(otherPortal);
+  expect((await windowInfo()).map((w) => w.url)).toEqual([dashboardUrl(), otherPortal]);
+
+  const [tab] = await Promise.all([
+    app.waitForEvent('window'),
+    app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[1].emit('new-window-for-tab'); }),
+  ]);
+  await tab.waitForURL(`${fixture.url}/reports-dashboard/5555`);
+  expect((await windowInfo()).map((w) => w.url)).toEqual([dashboardUrl(), otherPortal, `${fixture.url}/reports-dashboard/5555`]);
+});
+
+test('a child closed before ready-to-show is not shown and leaves the registry', async () => {
+  const [child] = await Promise.all([app.waitForEvent('window'), first.evaluate((url) => { window.open(url); }, `${fixture.url}/slow`)]);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[1].close());
+  await expect.poll(() => child.isClosed()).toBe(true);
+  await first.waitForTimeout(2500);
+  expect((await windowInfo()).map(({ url, visible }) => ({ url, visible }))).toEqual([{ url: dashboardUrl(), visible: !quiet }]);
+  // Navigate acts on the first window, so the closed child is not the active registry window.
+  await clickMenu('Navigate', 'Deals');
+  await first.waitForURL(dealsUrl());
+});
+
+test('the last window closed before ready-to-show stays hidden', async () => {
+  test.skip(quiet || !isMac, 'needs visible macOS windows; runs in CI');
+  const { electronApp, dir } = await launchApp(`${fixture.url}/slow`);
+  try {
+    await electronApp.firstWindow();
+    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+    const visible = () => electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.isVisible()));
+    await expect.poll(() => electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getURL())).toBe(`${fixture.url}/slow`);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect(await visible()).toEqual([false]);
+  } finally {
+    await electronApp.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('File > New Window opens a second window, and Cmd+T and Cmd+N belong to New Tab and New Window only', async () => {

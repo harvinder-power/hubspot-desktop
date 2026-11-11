@@ -49,7 +49,7 @@ app.whenReady().then(async () => {
     partition: PARTITION,
     preloadPath: path.join(__dirname, '../preload/preload.js'),
     base: baseUrl(),
-    secure: (contents) => setupSecurity(contents, { quiet: QUIET }),
+    secure: setupSecurity,
     quiet: QUIET,
   });
   const routes = createRouteOpener(registry);

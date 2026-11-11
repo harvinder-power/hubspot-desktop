@@ -31,10 +31,12 @@ function isAppOrigin(urlOrOrigin, { base = DEFAULT_BASE_URL } = {}) {
   return url.hostname === 'app.hubspot.com' || REGION_HOST.test(url.hostname);
 }
 
-// The kind of the page a window has committed: 'none' (nothing yet), 'app-sign-in',
-// 'app', or 'outside' (every other URL, including about:blank, data: and error pages).
+// The kind of the page a window has committed: 'none' (nothing yet), 'blank' (about:blank, which
+// window.open('') and window.open('about:blank') commit), 'app-sign-in', 'app', or 'outside'
+// (every other URL, including data: and error pages).
 function pageKind(committedUrl, { base = DEFAULT_BASE_URL } = {}) {
   if (committedUrl === '') return 'none';
+  if (committedUrl === 'about:blank') return 'blank';
   if (!isAppOrigin(committedUrl, { base })) return 'outside';
   const { pathname } = parse(committedUrl);
   const signIn = SIGN_IN_PATHS.some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/'));
@@ -43,7 +45,8 @@ function pageKind(committedUrl, { base = DEFAULT_BASE_URL } = {}) {
 
 const isWebUrl = (url) => ['http:', 'https:'].includes(parse(url)?.protocol);
 
-// The window title for an outside page, host first. Null means the page owns its title.
+// The window title for an outside page, host first. Null means the page owns its title,
+// so a blank child that the app fills in keeps the title the app gives it.
 function lockedTitle(committedUrl, { base = DEFAULT_BASE_URL } = {}) {
   if (pageKind(committedUrl, { base }) !== 'outside') return null;
   const url = parse(committedUrl);
@@ -51,14 +54,19 @@ function lockedTitle(committedUrl, { base = DEFAULT_BASE_URL } = {}) {
 }
 
 // http: is only usable in dev runs whose override base is itself http, and only on that host.
+// 127.0.0.1 and localhost count as one host, so a test can show two outside hostnames.
+const LOOPBACK = ['127.0.0.1', 'localhost'];
+const sameDevHost = (a, b) => a === b || (LOOPBACK.includes(a) && LOOPBACK.includes(b));
 function isPermittedScheme(url, base) {
   if (url.protocol === 'https:') return true;
   const baseUrl = parse(base);
-  return url.protocol === 'http:' && baseUrl?.protocol === 'http:' && url.hostname === baseUrl.hostname;
+  return url.protocol === 'http:' && baseUrl?.protocol === 'http:' && sameDevHost(url.hostname, baseUrl.hostname);
 }
 
 // Ordered rules. decide() applies the first row whose test passes.
 // `page` is the kind of the page the asking window has committed.
+// Every page test is false for 'blank', so a blank page gets what a non-web outside page gets.
+// An outside page gains nothing by going blank: it is trusted no more, and the empty page has no script.
 const RULES = [
   {
     name: 'blank-popup-from-app',

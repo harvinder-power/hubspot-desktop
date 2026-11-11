@@ -338,6 +338,67 @@ test('a popup from a provider page opens externally', async () => {
   expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
 });
 
+// Window ids follow creation order, so the newest window is the popup.
+const newestWindow = () =>
+  app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows().sort((a, b) => b.id - a.id)[0];
+    return { url: win.webContents.getURL(), title: win.getTitle() };
+  });
+const windowCount = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+
+test('a popup from an app page to an app URL that redirects out stays in the popup', async () => {
+  await startAt(window, dashboardUrl());
+  const [popup] = await Promise.all([
+    app.waitForEvent('window'),
+    window.evaluate((url) => { window.open(url); }, `${fixture.url}/redirect-out`),
+  ]);
+  await popup.waitForURL(idpUrl());
+  await expect.poll(newestWindow).toEqual({ url: idpUrl(), title: LOCKED_TITLE });
+  expect(await openedExternally()).toEqual([]);
+
+  await clickLink(popup, thirdUrl());
+  await popup.waitForURL(thirdUrl());
+  await clickLink(popup, dashboardUrl());
+  await popup.waitForURL(dashboardUrl());
+  await expect.poll(newestWindow).toEqual({ url: dashboardUrl(), title: '/reports-dashboard/4242' });
+  expect(await openedExternally()).toEqual([]);
+  await popup.close();
+});
+
+for (const blank of ['', 'about:blank']) {
+  test(`a blank popup (${JSON.stringify(blank)}) the app sends outside opens externally and closes`, async () => {
+    await startAt(window, dashboardUrl());
+    await window.evaluate(([url, target]) => { window.open(url).location = target; }, [blank, idpUrl()]);
+    await expect.poll(openedExternally).toEqual([idpUrl()]);
+    await expect.poll(windowCount).toBe(1);
+  });
+}
+
+test('a blank popup the app writes keeps its own title', async () => {
+  await startAt(window, dashboardUrl());
+  const [popup] = await Promise.all([
+    app.waitForEvent('window'),
+    window.evaluate(() => {
+      const child = window.open('');
+      child.document.write('<title>Print preview</title><h1>Print preview</h1>');
+      child.document.close();
+    }),
+  ]);
+  await expect.poll(newestWindow).toEqual({ url: 'about:blank', title: 'Print preview' });
+  expect(await openedExternally()).toEqual([]);
+  await popup.close();
+});
+
+test('the locked title follows the outside host from 127.0.0.1 to localhost', async () => {
+  const localhostUrl = `http://localhost:${new URL(third.url).port}/third-step`;
+  await signInToProvider();
+  await expect.poll(() => windowTitle(window)).toBe(LOCKED_TITLE);
+  await clickLink(window, localhostUrl);
+  await window.waitForURL(localhostUrl);
+  await expect.poll(() => windowTitle(window)).toBe('localhost (external page)');
+  expect(await openedExternally()).toEqual([]);
+});
+
 test('the app origin is granted notification permission', async () => {
   await startAt(window, dashboardUrl());
   expect(await window.evaluate(() => Notification.requestPermission())).toBe('granted');

@@ -60,7 +60,9 @@ test('pageKind names the committed page', () => {
     [RECORD, 'app'],
     ['https://app-eu1.hubspot.com/contacts/1', 'app'],
     [OKTA, 'outside'],
-    ['about:blank', 'outside'],
+    ['about:blank', 'blank'],
+    ['about:blank#x', 'outside'],
+    ['about:srcdoc', 'outside'],
     ['https://app.hubspot.com.evil.example/login', 'outside'],
     ['https://evil.example/login', 'outside'],
     [undefined, 'outside'],
@@ -76,7 +78,8 @@ test('lockedTitle is null for app pages and the empty page, and names the host o
   assert.equal(lockedTitle(''), null);
   assert.equal(lockedTitle('https://idp.example/authorize?x=1'), 'idp.example (external page)');
   assert.equal(lockedTitle('https://аpple.com/'), 'xn--pple-43d.com (external page)');
-  assert.equal(lockedTitle('about:blank'), 'about: (external page)');
+  assert.equal(lockedTitle('about:blank'), null);
+  assert.equal(lockedTitle('about:srcdoc'), 'about: (external page)');
   assert.equal(lockedTitle('https://app.hubspot.com.evil.example/'), 'app.hubspot.com.evil.example (external page)');
   assert.equal(lockedTitle('http://127.0.0.1:4322/idp', { base: OVERRIDE }), '127.0.0.1 (external page)');
 });
@@ -172,6 +175,27 @@ test('rule everything-else: other targets open externally', () => {
   assert.equal(decide({ url: OKTA, currentUrl: 'about:blank', kind: 'open' }), 'external');
 });
 
+test('a blank page reaches only app-origin and everything-else, and grants nothing more', () => {
+  const BLANK = 'about:blank';
+  assert.equal(pageKind(BLANK), 'blank');
+  assert.equal(lockedTitle(BLANK), null);
+  const expected = [
+    [{ url: RECORD, kind: 'navigate' }, 'allow'],
+    [{ url: RECORD, kind: 'open' }, 'allow'],
+    [{ url: OKTA, kind: 'navigate' }, 'external'],
+    [{ url: OKTA, kind: 'open' }, 'external'],
+    [{ url: LOGIN, kind: 'navigate' }, 'allow'],
+    [{ url: '', kind: 'open' }, 'deny'],
+    [{ url: BLANK, kind: 'open' }, 'deny'],
+    [{ url: BLANK, kind: 'navigate' }, 'deny'],
+    [{ url: 'blob:https://evil.example/x', kind: 'open' }, 'deny'],
+    [{ url: 'mailto:someone@example.com', kind: 'navigate' }, 'external'],
+    [{ url: 'javascript:alert(1)', kind: 'navigate' }, 'deny'],
+    [{ url: 'http://evil.example/', kind: 'navigate' }, 'deny'],
+  ];
+  for (const [args, action] of expected) assert.equal(decide({ ...args, currentUrl: BLANK }), action, JSON.stringify(args));
+});
+
 test('decide under the dev override keeps the override origin and nothing else', () => {
   const base = OVERRIDE;
   const dashboard = `${OVERRIDE}/reports-dashboard/4242`;
@@ -182,6 +206,10 @@ test('decide under the dev override keeps the override origin and nothing else',
   assert.equal(decide({ url: 'http://127.0.0.1:4323/next', currentUrl: idp, kind: 'navigate', base }), 'allow');
   assert.equal(decide({ url: dashboard, currentUrl: idp, kind: 'navigate', base }), 'allow');
   assert.equal(decide({ url: 'http://evil.example/', currentUrl: `${OVERRIDE}/login`, kind: 'navigate', base }), 'deny');
+  assert.equal(decide({ url: 'http://localhost:4323/next', currentUrl: idp, kind: 'navigate', base }), 'allow');
+  assert.equal(decide({ url: 'http://localhost:4323/next', currentUrl: dashboard, kind: 'navigate', base }), 'external');
+  assert.equal(decide({ url: 'http://localhost.evil.example/', currentUrl: idp, kind: 'navigate', base }), 'deny');
+  assert.equal(decide({ url: 'http://127.0.0.1:4323/', currentUrl: idp, kind: 'navigate' }), 'deny');
   assert.equal(decide({ url: `blob:${OVERRIDE}/uuid`, currentUrl: dashboard, kind: 'open', base }), 'allow');
 });
 

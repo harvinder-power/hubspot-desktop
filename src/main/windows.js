@@ -1,5 +1,6 @@
 const { app, BrowserWindow } = require('electron');
 const windowStateKeeper = require('electron-window-state');
+const { pageKind } = require('./links');
 
 // Windows with the same identifier join one native tab group on macOS.
 const TABBING_IDENTIFIER = 'hubspot-desktop';
@@ -47,15 +48,31 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
         spellcheck: true,
       },
     });
-    windows.add(win);
     state?.manage(win);
+    secure(win.webContents);
+    track(win, { host: () => host, state });
+    win.loadURL(url ?? base);
+    return win;
+  }
 
+  // A window that a page opened (window.open or target=_blank), already secured by its opener.
+  // An outside page is never tabbed: a third-party page must not sit in the tab bar like an app tab.
+  function adopt(win, { opener }) {
+    const host = () => (isMac && pageKind(win.webContents.getURL(), { base }) !== 'outside' ? opener : null);
+    track(win, { host });
+  }
+
+  // host() is read at ready-to-show, when the window has committed its first page.
+  function track(win, { host, state = null }) {
+    windows.add(win);
+    let closedEarly = false;
     win.on('focus', () => {
       windows.delete(win);
       windows.add(win);
     });
     // On macOS the last window hides instead of closing, so the app stays in the dock and tray.
     win.on('close', (event) => {
+      closedEarly = true;
       if (isMac && !quitting && windows.size === 1) {
         event.preventDefault();
         win.hide();
@@ -63,17 +80,16 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
     });
     win.on('closed', () => windows.delete(win));
     win.once('ready-to-show', () => {
-      if (quiet) return;
+      // A window closed before its first paint stays closed or hidden.
+      if (quiet || closedEarly || win.isDestroyed()) return;
       // A tab joins its group once its contents are ready. Added at creation, it joined in 1 of 3 CI runs.
-      if (host && !host.isDestroyed() && host.isVisible()) host.addTabbedWindow(win);
+      const tabHost = host();
+      if (tabHost && !tabHost.isDestroyed() && tabHost.isVisible()) tabHost.addTabbedWindow(win);
       win.show();
       if (state?.isMaximized) win.maximize();
     });
-
-    secure(win.webContents);
+    win.webContents.on('did-create-window', (child) => adopt(child, { opener: win }));
     for (const listener of listeners) listener(win);
-    win.loadURL(url ?? base);
-    return win;
   }
 
   function show() {
