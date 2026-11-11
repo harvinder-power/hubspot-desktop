@@ -12,6 +12,7 @@
     "build:dmg": "electron-builder --mac dmg",
     "test": "node --test \"test/unit/*.test.js\"",
     "test:e2e": "playwright test",
+    "check:chars": "node scripts/check-hidden-chars.js",
     "fixture": "node test/fixture/server.js",
     "postinstall": "electron-builder install-app-deps"
   },

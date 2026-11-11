@@ -20,6 +20,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # The check reads the same tracked files on every OS, so one OS runs it.
+      - if: runner.os == 'Linux'
+        run: npm run check:chars
       - run: npm test
       # Linux runners have no display, so Electron runs under a virtual X server.
       - run: ${{ runner.os == 'Linux' && 'xvfb-run -a ' || '' }}npm run test:e2e
