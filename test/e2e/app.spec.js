@@ -288,6 +288,8 @@ test('preload IPC works from the app origin only', async () => {
   await app.evaluate(({ ipcMain, Notification }) => {
     globalThis.ipcSeen = [];
     globalThis.notificationsShown = [];
+    // The OS notification service is replaced too: on Linux isSupported() is false without libnotify.
+    Notification.isSupported = () => true;
     Notification.prototype.show = function show() {
       globalThis.notificationsShown.push(this.title);
     };

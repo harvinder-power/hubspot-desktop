@@ -21,9 +21,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
-      # Electron's Notification.isSupported() is false on Linux without libnotify.
-      - if: runner.os == 'Linux'
-        run: dpkg -s libnotify4 || (sudo apt-get update && sudo apt-get install -y libnotify4)
       # Linux runners have no display, so Electron runs under a virtual X server.
       - run: ${{ runner.os == 'Linux' && 'xvfb-run -a -s "-screen 0 1920x1080x24" ' || '' }}npm run test:e2e
       - if: failure()
