@@ -232,7 +232,8 @@ test('rule everything-else: other targets open externally', () => {
 test('a blank page reaches only app-origin and everything-else, and grants nothing more', () => {
   const BLANK = 'about:blank';
   assert.equal(pageKind(BLANK), 'blank');
-  assert.equal(lockedTitle(BLANK), null);
+  assert.equal(lockedTitle(BLANK), 'about: (external page)');
+  assert.equal(lockedTitle(BLANK, { activeIndex: 0, appOpenedBlank: true }), null);
   const expected = [
     [{ url: RECORD, kind: 'navigate' }, 'allow'],
     [{ url: RECORD, kind: 'open' }, 'allow'],
