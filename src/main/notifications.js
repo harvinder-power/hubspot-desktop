@@ -4,8 +4,10 @@ const { baseUrl } = require('./base-url');
 const { isAppOrigin } = require('./links');
 
 class NotificationManager {
-  constructor(registry) {
+  // quiet: a notification click never bounces the dock.
+  constructor(registry, { quiet = false } = {}) {
     this.registry = registry;
+    this.quiet = quiet;
     this.setupIPC();
   }
 
@@ -29,7 +31,7 @@ class NotificationManager {
     notification.on('click', () => {
       this.registry.show();
       // Bounce dock icon
-      if (process.platform === 'darwin') {
+      if (process.platform === 'darwin' && !this.quiet) {
         app.dock.bounce('informational');
       }
     });

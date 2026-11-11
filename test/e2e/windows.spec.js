@@ -1,8 +1,11 @@
 const { test, expect } = require('@playwright/test');
+const { execFileSync, spawn } = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const electronPath = require('electron');
 const fixtureServer = require('../fixture/server');
-const { evidenceDir, quiet, launchApp, startAt } = require('./helpers');
+const { evidenceDir, quiet, repoRoot, launchApp, startAt } = require('./helpers');
 
 const isMac = process.platform === 'darwin';
 
@@ -94,97 +97,54 @@ test('File > New Tab opens a second registry window on the dashboard with the sh
   if (isMac) expect(windows.map((w) => w.tabbingIdentifier)).toEqual(['hubspot-desktop', 'hubspot-desktop']);
 });
 
-test('on macOS New Tab joins the native tab group and New Window does not', async () => {
+// macOS orders the background tabs of a native tab group out, and Electron still reports them visible.
+// So the tab signal is the Core Graphics on-screen flag of each window, read by a native probe.
+// In each group exactly one window is on screen. A separate window is always on screen.
+test.describe('native tab groups (CI only)', () => {
   test.skip(quiet || !isMac, 'needs visible macOS windows; runs in CI');
-  // The minimum window size fits the CI screen (1024 wide), so macOS does not move the frame.
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setBounds({ x: 40, y: 60, width: 800, height: 600 }));
-  await newTab();
-  const [page] = await Promise.all([app.waitForEvent('window'), clickMenu('File', 'New Window')]);
-  await page.waitForURL(dashboardUrl());
-  await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true, true]);
-  const windows = await windowInfo();
-  console.log(`3a after New Tab then New Window: ${JSON.stringify(windows.map(({ tabbingIdentifier, bounds, visible }) => ({ tabbingIdentifier, bounds, visible })))}`);
-  // A tab takes the frame of its group. A separate window keeps its own default frame.
-  expect(windows[1].bounds).toEqual(windows[0].bounds);
-  expect(windows[2].bounds).not.toEqual(windows[0].bounds);
-  fs.mkdirSync(evidenceDir, { recursive: true });
-  await page.screenshot({ path: path.join(evidenceDir, 'new-window.png') });
-});
 
-// DIAGNOSTIC: logs candidate tab-membership signals in CI. Removed once a signal is chosen.
-const { execFileSync } = require('node:child_process');
-const os = require('node:os');
-const probe = path.join(os.tmpdir(), 'hubspot-desktop-cg-windows');
-const settle = () => new Promise((resolve) => setTimeout(resolve, 1000));
-async function snapshot(label) {
-  const electronSide = await app.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows()
-      .sort((a, b) => a.id - b.id)
-      .map((w) => ({
-        id: w.id,
-        cg: Number(w.getMediaSourceId().split(':')[1]),
-        visible: w.isVisible(),
-        focused: w.isFocused(),
-        bounds: w.getBounds(),
-        content: w.getContentBounds(),
-      }))
-  );
-  const cg = JSON.parse(execFileSync(probe, [String(app.process().pid)], { encoding: 'utf8' }));
-  const rows = electronSide.map((w) => {
-    const native = cg.find((c) => c.number === w.cg);
-    return { ...w, onScreen: native?.onScreen ?? null, layer: native?.layer ?? null, cgBounds: native?.bounds ?? null, name: native?.name };
-  });
-  console.log(`DIAG ${label}: ${JSON.stringify(rows)}`);
-  console.log(`DIAG ${label} cg-all: ${JSON.stringify(cg.filter((c) => c.layer === 0))}`);
-}
-const selectNextTab = (index) => app.evaluate(({ BrowserWindow }, i) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[i].selectNextTab(), index);
-
-test.describe('DIAG tab signals', () => {
-  test.skip(quiet || !isMac, 'diagnostic needs visible macOS windows');
+  const probe = path.join(os.tmpdir(), 'hubspot-desktop-cg-windows');
   test.beforeAll(() => {
     execFileSync('swiftc', ['-O', '-o', probe, path.join(__dirname, 'tools', 'cg-windows.swift')], { stdio: 'inherit' });
   });
+
+  // The on-screen flag of each app window, in creation order.
+  async function onScreen() {
+    const ids = await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()
+        .sort((a, b) => a.id - b.id)
+        .map((w) => Number(w.getMediaSourceId().split(':')[1]))
+    );
+    const native = JSON.parse(execFileSync(probe, [String(app.process().pid)], { encoding: 'utf8' }));
+    return ids.map((id) => native.find((w) => w.number === id)?.onScreen ?? null);
+  }
+
   for (const run of [1, 2, 3]) {
-    test(`DIAG A New Tab as built run ${run}`, async () => {
+    test(`on macOS New Tab joins the native tab group and New Window does not (run ${run})`, async () => {
       await newTab();
-      await expect.poll(async () => (await windowInfo()).length).toBe(2);
-      await settle();
-      await snapshot(`A${run} after New Tab`);
-      await selectNextTab(0);
-      await settle();
-      await snapshot(`A${run} after host.selectNextTab`);
-      await selectNextTab(0);
-      await settle();
-      await snapshot(`A${run} after second host.selectNextTab`);
-      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[1].moveTabToNewWindow());
-      await settle();
-      await snapshot(`A${run} after tab.moveTabToNewWindow`);
-    });
-    test(`DIAG B addTabbedWindow after show run ${run}`, async () => {
-      await Promise.all([app.waitForEvent('window'), clickMenu('File', 'New Window')]);
-      await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true]);
-      await settle();
-      await snapshot(`B${run} separate before addTabbedWindow`);
-      await app.evaluate(({ BrowserWindow }) => {
-        const [host, win] = BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id);
-        host.addTabbedWindow(win);
-      });
-      await settle();
-      await snapshot(`B${run} after addTabbedWindow`);
-      await selectNextTab(0);
-      await settle();
-      await snapshot(`B${run} after host.selectNextTab`);
-    });
-    test(`DIAG C New Window run ${run}`, async () => {
-      await Promise.all([app.waitForEvent('window'), clickMenu('File', 'New Window')]);
-      await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true]);
-      await settle();
-      await snapshot(`C${run} after New Window`);
-      await selectNextTab(0);
-      await settle();
-      await snapshot(`C${run} after host.selectNextTab`);
+      const [page] = await Promise.all([app.waitForEvent('window'), clickMenu('File', 'New Window')]);
+      await page.waitForURL(dashboardUrl());
+      await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true, true]);
+      // Host and tab share one group, so only the front tab is on screen. New Window stays on screen.
+      await expect.poll(onScreen).toEqual([false, true, true]);
+      console.log(`tab group run ${run}: onScreen ${JSON.stringify(await onScreen())}`);
+      if (run === 1) {
+        fs.mkdirSync(evidenceDir, { recursive: true });
+        await page.screenshot({ path: path.join(evidenceDir, 'new-window.png') });
+      }
     });
   }
+
+  test('with the last window hidden, New Tab shows it and joins it, and closing the tab leaves one window', async () => {
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+    await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([false]);
+    await newTab();
+    await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true, true]);
+    await expect.poll(onScreen).toEqual([false, true]);
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[1].close());
+    await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true]);
+    await expect.poll(onScreen).toEqual([true]);
+  });
 });
 
 test('File > New Window opens a second window, and Cmd+T and Cmd+N belong to New Tab and New Window only', async () => {
@@ -271,21 +231,71 @@ test('New Tab opens the dashboard of the portal learned in the first window', as
   expect(await app.evaluate(() => globalThis.startedUrls)).toEqual([dashboardUrl()]);
 });
 
-test('quiet mode shows no window and creates no tray or global shortcut', async () => {
+test('quiet mode shows no window or dock icon and creates no tray or global shortcut', async () => {
   const { electronApp, dir } = await launchApp(fixture.url, { quiet: true });
   try {
-    await (await electronApp.firstWindow()).waitForURL(dashboardUrl());
-    const state = await electronApp.evaluate(({ BrowserWindow, globalShortcut }) => ({
-      windows: BrowserWindow.getAllWindows().length,
-      noneVisible: BrowserWindow.getAllWindows().every((w) => !w.isVisible()),
-      // main.js requires tray.js only when it creates the tray.
-      trayLoaded: Object.keys(process.mainModule.constructor._cache).some((file) => file.endsWith('tray.js')),
-      shortcut: globalShortcut.isRegistered('CommandOrControl+Shift+H'),
-    }));
+    const page = await electronApp.firstWindow();
+    await page.waitForURL(dashboardUrl());
+    const [child] = await Promise.all([
+      electronApp.waitForEvent('window'),
+      page.evaluate((url) => { window.open(url); }, contactsUrl()),
+    ]);
+    await child.waitForURL(contactsUrl());
+    const state = await electronApp.evaluate(({ app: electronApp, BrowserWindow, globalShortcut }) => {
+      const loaded = (name) => Object.keys(process.mainModule.constructor._cache).some((file) => file.endsWith(`/src/main/${name}`));
+      return {
+        windows: BrowserWindow.getAllWindows().length,
+        noneVisible: BrowserWindow.getAllWindows().every((w) => !w.isVisible()),
+        // main.js requires tray.js only when it creates the tray. windows.js is the positive control in the same cache.
+        windowsLoaded: loaded('windows.js'),
+        trayLoaded: loaded('tray.js'),
+        dockVisible: process.platform === 'darwin' ? electronApp.dock.isVisible() : false,
+        shortcut: globalShortcut.isRegistered('CommandOrControl+Shift+H'),
+      };
+    });
     console.log(`quiet launch: ${JSON.stringify(state)}`);
-    expect(state).toEqual({ windows: 1, noneVisible: true, trayLoaded: false, shortcut: false });
+    expect(state).toEqual({ windows: 2, noneVisible: true, windowsLoaded: true, trayLoaded: false, dockVisible: false, shortcut: false });
   } finally {
     await electronApp.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('on macOS closing the last window keeps it, and app.quit() still quits', async () => {
+  test.skip(!isMac, 'the last window hides on macOS only');
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+  expect((await windowInfo()).map((w) => w.url)).toEqual([dashboardUrl()]);
+  const exited = new Promise((resolve) => app.process().once('exit', (code, signal) => resolve({ code, signal })));
+  await app.evaluate(({ app: electronApp }) => { setTimeout(() => electronApp.quit(), 0); });
+  expect(await exited).toEqual({ code: 0, signal: null });
+  app = null;
+});
+
+test('a second launch with the same user data exits, and the first instance answers it', async () => {
+  test.skip(!isMac, 'with no window left the app quits off macOS');
+  // destroy() skips the close handler, so the registry is empty and its show() must open a window.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].destroy());
+  await expect.poll(async () => (await windowInfo()).length).toBe(0);
+  const second = spawn(electronPath, [repoRoot], {
+    env: {
+      ...process.env,
+      HUBSPOT_DESKTOP_BASE_URL: fixture.url,
+      HUBSPOT_DESKTOP_USER_DATA: userData,
+      HUBSPOT_DESKTOP_QUIET: quiet ? '1' : '0',
+    },
+    stdio: 'ignore',
+  });
+  const [page, code] = await Promise.all([app.waitForEvent('window'), new Promise((resolve) => second.once('exit', resolve))]);
+  await page.waitForURL(dashboardUrl());
+  expect(code).toBe(0);
+  expect((await windowInfo()).map((w) => w.url)).toEqual([dashboardUrl()]);
+});
+
+test('the native + tab button opens a second registry window on Dashboards', async () => {
+  const [page] = await Promise.all([
+    app.waitForEvent('window'),
+    app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].emit('new-window-for-tab'); }),
+  ]);
+  await page.waitForURL(dashboardUrl());
+  expect((await windowInfo()).map((w) => w.url)).toEqual([dashboardUrl(), dashboardUrl()]);
 });

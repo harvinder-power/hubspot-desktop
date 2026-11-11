@@ -23,7 +23,10 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
 
   // tab: false opens a separate window. Off macOS every window is separate.
   function open({ url, tab = true } = {}) {
-    const host = isMac && tab ? active() : null;
+    const current = isMac ? active() : null;
+    // The last window hides instead of closing. Show it again, so it does not come back later as a surprise.
+    if (current && !current.isVisible() && !quiet) current.show();
+    const host = tab ? current : null;
     // Window bounds persist for the first window only.
     const state = windows.size === 0 ? windowStateKeeper({ defaultWidth: 1400, defaultHeight: 900, file: 'window-state.json' }) : null;
     const win = new BrowserWindow({
@@ -46,7 +49,6 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
     });
     windows.add(win);
     state?.manage(win);
-    if (host?.isVisible()) host.addTabbedWindow(win);
 
     win.on('focus', () => {
       windows.delete(win);
@@ -62,6 +64,8 @@ function createWindowRegistry({ partition, preloadPath, base, secure, quiet = fa
     win.on('closed', () => windows.delete(win));
     win.once('ready-to-show', () => {
       if (quiet) return;
+      // A tab joins its group once its contents are ready. Added at creation, it joined in 1 of 3 CI runs.
+      if (host && !host.isDestroyed() && host.isVisible()) host.addTabbedWindow(win);
       win.show();
       if (state?.isMaximized) win.maximize();
     });

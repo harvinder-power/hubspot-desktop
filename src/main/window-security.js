@@ -23,7 +23,8 @@ function applyTitle(win, contents) {
   return title;
 }
 
-function setupSecurity(contents) {
+// quiet: child windows stay hidden, so a local test run cannot take focus.
+function setupSecurity(contents, { quiet = false } = {}) {
   const base = baseUrl();
   const win = BrowserWindow.fromWebContents(contents);
 
@@ -45,12 +46,14 @@ function setupSecurity(contents) {
 
   contents.setWindowOpenHandler(({ url }) => {
     const action = decide({ url, currentUrl: contents.getURL(), kind: 'open', base });
-    if (action === 'allow') return { action: 'allow', overrideBrowserWindowOptions: CHILD_WINDOW_OPTIONS };
+    if (action === 'allow') {
+      return { action: 'allow', overrideBrowserWindowOptions: quiet ? { ...CHILD_WINDOW_OPTIONS, show: false } : CHILD_WINDOW_OPTIONS };
+    }
     if (action === 'external') shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  contents.on('did-create-window', (child) => setupSecurity(child.webContents));
+  contents.on('did-create-window', (child) => setupSecurity(child.webContents, { quiet }));
 }
 
 module.exports = { PARTITION, setupSecurity };

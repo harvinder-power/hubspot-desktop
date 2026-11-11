@@ -49,7 +49,7 @@ app.whenReady().then(async () => {
     partition: PARTITION,
     preloadPath: path.join(__dirname, '../preload/preload.js'),
     base: baseUrl(),
-    secure: setupSecurity,
+    secure: (contents) => setupSecurity(contents, { quiet: QUIET }),
     quiet: QUIET,
   });
   const routes = createRouteOpener(registry);
@@ -57,7 +57,7 @@ app.whenReady().then(async () => {
   const newWindow = () => registry.open({ url: routes.url('dashboards'), tab: false });
   registry.onWindow((win) => win.on('new-window-for-tab', newTab));
 
-  notificationManager = new NotificationManager(registry);
+  notificationManager = new NotificationManager(registry, { quiet: QUIET });
   dockManager = new DockManager();
   createMenu({ registry, openRoute: routes.open, newTab, newWindow });
 
