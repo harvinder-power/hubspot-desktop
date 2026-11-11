@@ -19,8 +19,13 @@ function totalUnread(counts) {
   return Math.max(0, ...counts);
 }
 
+// Chromium's code for a navigation that stopped before it committed. The window still shows its last page.
+const ERR_ABORTED = -3;
+
 // Each app window's count is read again on each title update and each commit, and is dropped when the
 // window closes. Outside popups are not in the registry, and an outside page in an app window counts 0.
+// A main-frame error page commits with did-fail-load and no did-navigate, and a gone renderer shows no
+// page, so both count 0.
 function watchBadge({ registry, base, setCount }) {
   const counts = new Map();
   const apply = () => setCount(totalUnread(counts.values()));
@@ -31,8 +36,16 @@ function watchBadge({ registry, base, setCount }) {
       counts.set(win, isApp ? unreadFromTitle(contents.getTitle()) : 0);
       apply();
     };
+    const reset = () => {
+      counts.set(win, 0);
+      apply();
+    };
     contents.on('page-title-updated', update);
     contents.on('did-navigate', update);
+    contents.on('did-fail-load', (event, code, description, url, isMainFrame) => {
+      if (isMainFrame && code !== ERR_ABORTED) reset();
+    });
+    contents.on('render-process-gone', reset);
     win.on('closed', () => {
       counts.delete(win);
       apply();

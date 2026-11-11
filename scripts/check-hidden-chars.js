@@ -6,10 +6,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const HIDDEN_RANGES = [
+  [0x00ad, 0x00ad],
+  [0x061c, 0x061c],
+  [0x180e, 0x180e],
   [0x200b, 0x200f],
-  [0x202a, 0x202e],
+  [0x2028, 0x202e],
   [0x2060, 0x2069],
   [0xfeff, 0xfeff],
+  [0xe0000, 0xe007f],
 ];
 const ALLOWED_CONTROLS = [0x09, 0x0a, 0x0d];
 const BOM = 0xfeff;
@@ -39,6 +43,16 @@ function findHiddenChars(text) {
 
 const hex = (codePoint) => `U+${codePoint.toString(16).toUpperCase().padStart(4, '0')}`;
 
+// Returns the text of a file, or null when it is missing, as a tracked file deleted from the work tree is.
+function readText(file) {
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
 function main() {
   const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
   const files = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' })
@@ -46,7 +60,9 @@ function main() {
     .filter((file) => file && !BINARY_EXTENSIONS.has(path.extname(file).toLowerCase()));
   let failures = 0;
   for (const file of files) {
-    for (const { line, column, codePoint } of findHiddenChars(fs.readFileSync(path.join(root, file), 'utf8'))) {
+    const text = readText(path.join(root, file));
+    if (text === null) continue;
+    for (const { line, column, codePoint } of findHiddenChars(text)) {
       console.error(`${file}:${line}:${column} ${hex(codePoint)}`);
       failures += 1;
     }
@@ -60,4 +76,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { findHiddenChars };
+module.exports = { findHiddenChars, readText };

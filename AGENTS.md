@@ -33,9 +33,10 @@
 - CI runs `npm test` and `npm run test:e2e` on `macos-latest`, `ubuntu-latest` and `windows-latest`. Linux also runs `npm run check:chars`.
 - One OS failing does not cancel the others (`fail-fast: false`).
 - Linux runs e2e under `xvfb-run`. Windows needs no extra setup.
-- The Linux runner has no `libnotify4`, so the e2e suite stubs `Notification.isSupported()` with `show()`.
+- The quiet-mode notification test stubs no notification API. It proves that a page notification shows nothing from `Notification.permission === 'denied'`, read before any `new Notification`.
 - Off macOS, tests of macOS-only behaviour skip with a reason: native tab groups and the last window hiding.
 - The badge tests record every `app.setBadgeCount` call and read `app.getBadgeCount()` on every OS. No test checks that the Windows taskbar or a Linux launcher draws the count. On Linux, Electron does not report the renderer sandbox flag.
+- Known hole: Electron 45.3 binds the web Badging API (`navigator.setAppBadge`) for every frame with no origin check, and no switch removes it. The badge test for it is marked `test.fail`, so it fails the run once the API is gone.
 - To read a failure on an OS you do not have:
   - `gh run view <run-id> --log-failed` prints the failing steps of every job.
   - The failed job uploads `test-results/` as the artifact `playwright-results-<os>`.
