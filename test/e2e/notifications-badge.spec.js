@@ -71,6 +71,98 @@ test('an outside page with a count title leaves the badge unchanged', async () =
   expect(await badgeCalls()).not.toContain(3);
 });
 
+// Electron binds the web Badging API for every frame and worker with no origin check, and it sets the dock badge.
+async function badgeApi(page) {
+  return page.evaluate(async () => {
+    const worker = new Worker(URL.createObjectURL(new Blob(['postMessage([typeof navigator.setAppBadge, typeof navigator.clearAppBadge])'])));
+    const inWorker = await new Promise((resolve) => { worker.onmessage = (event) => resolve(event.data); });
+    worker.terminate();
+    return { set: typeof navigator.setAppBadge, clear: typeof navigator.clearAppBadge, worker: inWorker };
+  });
+}
+
+const titles = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.webContents.getTitle()));
+
+// A page call goes to the main process over a separate channel, so the title fence orders it only on a best-effort basis.
+async function callAndFence(page, call, fence) {
+  const result = await page.evaluate(async ({ call: name, fence: title }) => {
+    const outcome = typeof navigator[name] === 'function'
+      ? await (name === 'setAppBadge' ? navigator.setAppBadge(42) : navigator.clearAppBadge()).then(() => 'resolved', (error) => `rejected ${error}`)
+      : 'absent';
+    document.title = title;
+    return outcome;
+  }, { call, fence });
+  await expect.poll(titles).toContain(fence);
+  return result;
+}
+
+test('no page can set the badge through the web Badging API', async () => {
+  // Known hole: neither --disable-blink-features=Badging nor any other switch removes the API in Electron 45.3.
+  test.fail(true, 'Electron binds BadgeService for every frame with no origin check; see the PR 14 follow-up');
+  await startAt(app, window, titleUrl(3));
+  await expectBadge(3);
+  const [child] = await Promise.all([app.waitForEvent('window'), window.evaluate((url) => { window.open(url); }, `${fixture.url}/login`)]);
+  try {
+    await child.waitForURL(`${fixture.url}/login`);
+    await child.evaluate(() => document.querySelector('#idp-link').click());
+    await child.waitForURL((url) => url.origin === idp.url);
+    const measured = { platform: process.platform, app: await badgeApi(window), outside: await badgeApi(child) };
+    measured.outsideSet = await callAndFence(child, 'setAppBadge', 'after set');
+    measured.afterOutsideSet = await appBadge();
+    measured.outsideClear = await callAndFence(child, 'clearAppBadge', 'after clear');
+    measured.afterOutsideClear = await appBadge();
+    console.log(`Badging API: ${JSON.stringify(measured)}`);
+    const absent = { set: 'undefined', clear: 'undefined', worker: ['undefined', 'undefined'] };
+    expect(measured.outside).toEqual(absent);
+    expect(measured.app).toEqual(absent);
+    expect([measured.afterOutsideSet, measured.afterOutsideClear]).toEqual([3, 3]);
+  } finally {
+    await child.close();
+  }
+});
+
+async function openCountWindow(count) {
+  await startAt(app, window, dashboardUrl());
+  const [child] = await Promise.all([app.waitForEvent('window'), window.evaluate((url) => { window.open(url); }, titleUrl(count))]);
+  await child.waitForURL(titleUrl(count));
+  await expectBadge(count);
+  return child;
+}
+
+// Runs fn(webContents) in the main process for the window that has committed `url`.
+const onWindowAt = (url, fn) => app.evaluate(({ BrowserWindow }, { url: target, body }) => {
+  const contents = BrowserWindow.getAllWindows().map((w) => w.webContents).find((c) => c.getURL() === target);
+  return new Function('contents', body)(contents);
+}, { url, body: `(${fn})(contents)` });
+
+test('a window whose next load fails drops its count', async () => {
+  const child = await openCountWindow(3);
+  // Nothing listens on port 1, so the load fails and the window commits an error page with no did-navigate.
+  await onWindowAt(titleUrl(3), (contents) => { contents.loadURL('http://127.0.0.1:1/').catch(() => {}); });
+  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.webContents.getURL()))).toContain('http://127.0.0.1:1/');
+  await expectBadge(0);
+  await child.close();
+});
+
+test('a window whose renderer exits drops its count', async () => {
+  // A window.open child shares its opener's renderer, so the crash runs in an app of its own.
+  const own = await launchApp(fixture.url);
+  try {
+    const page = await own.electronApp.firstWindow();
+    await page.waitForURL(dashboardUrl());
+    await page.goto(titleUrl(4));
+    const count = () => own.electronApp.evaluate(({ app: electronApp }) => electronApp.getBadgeCount());
+    await expect.poll(count).toBe(4);
+    await own.electronApp.evaluate(({ BrowserWindow }, url) => {
+      BrowserWindow.getAllWindows().find((w) => w.webContents.getURL() === url).webContents.forcefullyCrashRenderer();
+    }, titleUrl(4));
+    await expect.poll(count).toBe(0);
+  } finally {
+    await own.electronApp.close();
+    fs.rmSync(own.dir, { recursive: true, force: true });
+  }
+});
+
 test('closing a window removes its count from the badge', async () => {
   await startAt(app, window, dashboardUrl());
   const [child] = await Promise.all([app.waitForEvent('window'), window.evaluate((url) => { window.open(url); }, titleUrl(5))]);
@@ -100,13 +192,8 @@ test('in quiet mode a page notification shows nothing', async () => {
   try {
     const page = await quiet.electronApp.firstWindow();
     await page.waitForURL(dashboardUrl());
-    await quiet.electronApp.evaluate(({ Notification }) => {
-      globalThis.notificationsShown = 0;
-      // On Linux isSupported() is false without libnotify, so the stub makes every OS take the same path.
-      Notification.isSupported = () => true;
-      Notification.prototype.show = () => { globalThis.notificationsShown += 1; };
-    });
-    // The permission check comes first, so no run reaches the constructor while the permission is granted.
+    // The denied permission is the proof: Chromium shows a page notification itself, and only once the
+    // origin holds the permission. It is checked before any constructor call, so no run can show one.
     expect(await page.evaluate(() => Notification.permission)).toBe('denied');
     const event = await page.evaluate(() => new Promise((resolve) => {
       const notification = new Notification('Test', { body: 'x' });
@@ -114,7 +201,6 @@ test('in quiet mode a page notification shows nothing', async () => {
       notification.onerror = () => resolve('error');
     }));
     expect(event).toBe('error');
-    expect(await quiet.electronApp.evaluate(() => globalThis.notificationsShown)).toBe(0);
   } finally {
     await quiet.electronApp.close();
     fs.rmSync(quiet.dir, { recursive: true, force: true });
