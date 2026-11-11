@@ -10,6 +10,7 @@ const evidenceDir = process.env.EVIDENCE_DIR || path.join(repoRoot, 'test-result
 let fixture;
 let idp;
 let third;
+let chain;
 let userData;
 let app;
 let window;
@@ -18,8 +19,25 @@ const dashboardUrl = () => `${fixture.url}/reports-dashboard/4242`;
 const loginUrl = () => `${fixture.url}/login`;
 const idpUrl = () => `${idp.url}/idp/authorize?return_to=${encodeURIComponent(dashboardUrl())}`;
 const thirdUrl = () => `${third.url}/third-step`;
+const chainUrl = () => `${chain.url}/idp/authorize?return_to=${encodeURIComponent(dashboardUrl())}`;
 const DASHBOARD_STATE = () => ({ href: dashboardUrl(), title: '/reports-dashboard/4242' });
-const SIGN_IN_TITLE = 'Sign in: 127.0.0.1';
+const LOCKED_TITLE = '127.0.0.1 (external page)';
+
+// Launches the app against `baseUrl` with its own user-data directory and a stubbed shell.openExternal.
+async function launchApp(baseUrl) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubspot-desktop-e2e-'));
+  const electronApp = await electron.launch({
+    args: [repoRoot],
+    env: { ...process.env, HUBSPOT_DESKTOP_BASE_URL: baseUrl, HUBSPOT_DESKTOP_USER_DATA: dir },
+  });
+  await electronApp.evaluate(({ shell }) => {
+    globalThis.openedExternally = [];
+    shell.openExternal = async (url) => {
+      globalThis.openedExternally.push(url);
+    };
+  });
+  return { electronApp, dir };
+}
 
 function screenshot(page, name) {
   fs.mkdirSync(evidenceDir, { recursive: true });
@@ -55,9 +73,9 @@ async function clickAndCollectExternal(page, selectorOrUrl) {
 const pageState = (page) => page.evaluate(() => ({ href: location.href, title: document.title }));
 
 // The native title bar is not in a page screenshot, so read it from the BrowserWindow.
-async function windowTitle(page) {
+async function windowTitle(page, electronApp = app) {
   const href = await page.evaluate(() => location.href);
-  return app.evaluate(
+  return electronApp.evaluate(
     ({ BrowserWindow }, url) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL() === url)?.getTitle(),
     href
   );
@@ -72,22 +90,9 @@ async function signInToProvider() {
 test.beforeAll(async () => {
   idp = await fixtureServer.start(0);
   third = await fixtureServer.start(0);
-  fixture = await fixtureServer.start(0, { portalId: '4242', idpOrigin: idp.url });
-  userData = fs.mkdtempSync(path.join(os.tmpdir(), 'hubspot-desktop-e2e-'));
-  app = await electron.launch({
-    args: [repoRoot],
-    env: {
-      ...process.env,
-      HUBSPOT_DESKTOP_BASE_URL: fixture.url,
-      HUBSPOT_DESKTOP_USER_DATA: userData,
-    },
-  });
-  await app.evaluate(({ shell }) => {
-    globalThis.openedExternally = [];
-    shell.openExternal = async (url) => {
-      globalThis.openedExternally.push(url);
-    };
-  });
+  chain = await fixtureServer.start(0);
+  fixture = await fixtureServer.start(0, { portalId: '4242', idpOrigin: idp.url, chainOrigin: chain.url });
+  ({ electronApp: app, dir: userData } = await launchApp(fixture.url));
   window = await app.firstWindow();
   await window.waitForURL(`${fixture.url}/reports-dashboard/4242`);
 });
@@ -97,6 +102,7 @@ test.afterAll(async () => {
   await fixture?.close();
   await idp?.close();
   await third?.close();
+  await chain?.close();
   if (userData) fs.rmSync(userData, { recursive: true, force: true });
 });
 
@@ -159,7 +165,7 @@ test('target=_blank link opens a second app window that keeps the link policy', 
 test('sign-in round trip: the provider stays in the window and the title names its host', async () => {
   await signInToProvider();
   await expect(window.locator('h1')).toHaveText('Identity provider');
-  await expect.poll(() => windowTitle(window)).toBe(SIGN_IN_TITLE);
+  await expect.poll(() => windowTitle(window)).toBe(LOCKED_TITLE);
   console.log(`2a BrowserWindow.getTitle() on the provider page: ${JSON.stringify(await windowTitle(window))}`);
   expect(await window.evaluate(() => Notification.requestPermission())).toBe('denied');
   await screenshot(window, '2a-sign-in-provider.png');
@@ -190,7 +196,7 @@ test('a server redirect to another origin goes through the same policy', async (
   await startAt(window, loginUrl());
   await clickLink(window, `${fixture.url}/redirect-out`);
   await window.waitForURL(idpUrl());
-  await expect.poll(() => windowTitle(window)).toBe(SIGN_IN_TITLE);
+  await expect.poll(() => windowTitle(window)).toBe(LOCKED_TITLE);
   expect(await openedExternally()).toEqual([]);
   await screenshot(window, '2c-redirect-from-login.png');
 });
@@ -199,7 +205,7 @@ test('a chain of providers stays in the window during sign-in and not after', as
   await signInToProvider();
   await clickLink(window, thirdUrl());
   await window.waitForURL(thirdUrl());
-  await expect.poll(() => windowTitle(window)).toBe(SIGN_IN_TITLE);
+  await expect.poll(() => windowTitle(window)).toBe(LOCKED_TITLE);
   expect(await openedExternally()).toEqual([]);
   await screenshot(window, '2d-chain-third-origin.png');
 
@@ -208,6 +214,94 @@ test('a chain of providers stays in the window during sign-in and not after', as
   expect(await clickAndCollectExternal(window, thirdUrl())).toEqual([thirdUrl()]);
   expect(await pageState(window)).toEqual(DASHBOARD_STATE());
   await screenshot(window, '2d-third-origin-from-dashboard.png');
+});
+
+// The provider page starts a navigation that never commits, then sets its own title.
+async function expectTitleStaysLocked(label, attack) {
+  await signInToProvider();
+  await expect.poll(() => windowTitle(window)).toBe(LOCKED_TITLE);
+  await window.evaluate(attack, { dashboard: dashboardUrl(), noContent: `${fixture.url}/no-content`, slow: `${fixture.url}/slow` });
+  await expect.poll(() => window.evaluate(() => document.title)).toBe('HubSpot');
+  await window.waitForTimeout(500);
+  const title = await windowTitle(window);
+  console.log(`2b ${label} BrowserWindow.getTitle(): ${JSON.stringify(title)}`);
+  expect(await window.evaluate(() => location.href)).toBe(idpUrl());
+  expect(title).toBe(LOCKED_TITLE);
+  expect(await openedExternally()).toEqual([]);
+}
+
+test('a stopped navigation to the app does not unlock the provider title', async () => {
+  await expectTitleStaysLocked('window.stop', ({ dashboard }) => {
+    location.href = dashboard;
+    window.stop();
+    document.title = 'HubSpot';
+  });
+  await screenshot(window, '2b-stopped-navigation.png');
+});
+
+test('a navigation to the app stopped in flight does not unlock the provider title', async () => {
+  await expectTitleStaysLocked('window.stop in flight', ({ slow }) => {
+    location.href = slow;
+    setTimeout(() => {
+      window.stop();
+      document.title = 'HubSpot';
+    }, 300);
+  });
+});
+
+test('a 204 answer from the app does not unlock the provider title', async () => {
+  await expectTitleStaysLocked('204', ({ noContent }) => {
+    location.href = noContent;
+    setTimeout(() => { document.title = 'HubSpot'; }, 300);
+  });
+  await screenshot(window, '2b-no-content.png');
+});
+
+test('Back to the provider page shows the locked title and the page cannot change it', async () => {
+  await signInToProvider();
+  await clickLink(window, '#return-link');
+  await window.waitForURL(dashboardUrl());
+  await expect.poll(() => windowTitle(window)).toBe('/reports-dashboard/4242');
+
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.navigationHistory.goBack());
+  await window.waitForURL(idpUrl());
+  await expect.poll(() => windowTitle(window)).toBe(LOCKED_TITLE);
+  console.log(`2c BrowserWindow.getTitle() after Back: ${JSON.stringify(await windowTitle(window))}`);
+  await window.evaluate(() => { document.title = 'HubSpot'; });
+  await expect.poll(() => window.evaluate(() => document.title)).toBe('HubSpot');
+  await window.waitForTimeout(500);
+  const title = await windowTitle(window);
+  console.log(`2c BrowserWindow.getTitle() after document.title = 'HubSpot': ${JSON.stringify(title)}`);
+  expect(title).toBe(LOCKED_TITLE);
+  await screenshot(window, '2c-back-to-provider.png');
+});
+
+test('a provider may pass through an app endpoint to a second provider', async () => {
+  await signInToProvider();
+  await clickLink(window, `${fixture.url}/chain-out`);
+  await window.waitForURL(chainUrl());
+  await expect(window.locator('h1')).toHaveText('Identity provider');
+  await expect.poll(() => windowTitle(window)).toBe(LOCKED_TITLE);
+  expect(await openedExternally()).toEqual([]);
+  await screenshot(window, '2d-chain-through-app.png');
+});
+
+test('a first load that redirects to a provider stays in the window', async () => {
+  const idpFirst = await fixtureServer.start(0, { portalId: '4242', idpOrigin: idp.url, rootToIdp: true });
+  const { electronApp, dir } = await launchApp(idpFirst.url);
+  try {
+    const page = await electronApp.firstWindow();
+    const providerUrl = `${idp.url}/idp/authorize?return_to=${encodeURIComponent(`${idpFirst.url}/reports-dashboard/4242`)}`;
+    await page.waitForURL(providerUrl);
+    await expect(page.locator('h1')).toHaveText('Identity provider');
+    await expect.poll(() => windowTitle(page, electronApp)).toBe(LOCKED_TITLE);
+    expect(await electronApp.evaluate(() => globalThis.openedExternally)).toEqual([]);
+    await screenshot(page, '2e-first-load-provider.png');
+  } finally {
+    await electronApp.close();
+    await idpFirst.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('preload IPC works from the app origin only', async () => {
@@ -244,7 +338,7 @@ test('preload IPC works from the app origin only', async () => {
   await expect.poll(badge).toBe('');
 });
 
-test('a sign-in popup opens a second app window in sign-in mode', async () => {
+test('a sign-in popup opens a second app window with the locked title', async () => {
   await startAt(window, loginUrl());
   const [popup] = await Promise.all([
     app.waitForEvent('window'),
@@ -252,10 +346,17 @@ test('a sign-in popup opens a second app window in sign-in mode', async () => {
   ]);
   await popup.waitForURL(idpUrl());
   await expect(popup.locator('h1')).toHaveText('Identity provider');
-  await expect.poll(() => windowTitle(popup)).toBe(SIGN_IN_TITLE);
+  await expect.poll(() => windowTitle(popup)).toBe(LOCKED_TITLE);
   expect(await openedExternally()).toEqual([]);
   await screenshot(popup, '2f-sign-in-popup.png');
   await popup.close();
+});
+
+test('a popup from a provider page opens externally', async () => {
+  await signInToProvider();
+  await window.evaluate((url) => { window.open(url); }, thirdUrl());
+  await expect.poll(openedExternally).toEqual([thirdUrl()]);
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
 });
 
 test('the app origin is granted notification permission', async () => {

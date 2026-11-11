@@ -51,31 +51,45 @@ function idpPage(returnTo) {
 <a id="return-link" href="${escapeHtml(returnTo)}">Continue to HubSpot</a>`);
 }
 
-function handle(req, res, portalId, idpOrigin) {
+function handle(req, res, { portalId, idpOrigin, chainOrigin, rootToIdp }) {
   const { pathname, searchParams } = new URL(req.url, 'http://fixture');
-  if (pathname === '/') {
-    res.writeHead(302, { Location: `/reports-dashboard/${portalId}` });
+  const returnTo = `http://${req.headers.host}/reports-dashboard/${portalId}`;
+  const authorize = (origin) => `${origin}/idp/authorize?return_to=${encodeURIComponent(returnTo)}`;
+  const redirect = (location) => {
+    res.writeHead(302, { Location: location });
+    res.end();
+  };
+  if (pathname === '/') return redirect(rootToIdp ? authorize(idpOrigin) : `/reports-dashboard/${portalId}`);
+  // Server redirect to the identity provider, as some sign-in starts do.
+  if (pathname === '/redirect-out') return redirect(authorize(idpOrigin));
+  // App endpoint that hands an identity provider on to a second provider.
+  if (pathname === '/chain-out') return redirect(authorize(chainOrigin));
+  if (pathname === '/no-content') {
+    res.writeHead(204);
     return res.end();
   }
-  // Server redirect to the identity provider, as some sign-in starts do.
-  if (pathname === '/redirect-out') {
-    const returnTo = `http://${req.headers.host}/reports-dashboard/${portalId}`;
-    res.writeHead(302, { Location: `${idpOrigin}/idp/authorize?return_to=${encodeURIComponent(returnTo)}` });
-    return res.end();
+  // Answers after two seconds, so a test can stop the navigation while it is in flight.
+  if (pathname === '/slow') {
+    return setTimeout(() => {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(page('Slow', '<h1>Slow</h1>'));
+    }, 2000);
   }
   const title = pathname.match(/^\/title\/(\d+)$/);
   let html;
   if (title) html = page(`(${title[1]}) Inbox`, `<h1>(${title[1]}) Inbox</h1>`);
   else if (pathname === '/editor') html = editorPage();
-  else if (pathname === '/login') html = loginPage(idpOrigin, `http://${req.headers.host}/reports-dashboard/${portalId}`);
+  else if (pathname === '/login') html = loginPage(idpOrigin, returnTo);
   else if (pathname === '/idp/authorize') html = idpPage(searchParams.get('return_to') || '/');
   else html = hubPage(pathname, portalId);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(html);
 }
 
-function start(port = 0, { portalId = '111', idpOrigin = '' } = {}) {
-  const server = http.createServer((req, res) => handle(req, res, portalId, idpOrigin));
+// `chainOrigin` is the second provider for /chain-out. `rootToIdp` makes / redirect to the provider.
+function start(port = 0, { portalId = '111', idpOrigin = '', chainOrigin = '', rootToIdp = false } = {}) {
+  const options = { portalId, idpOrigin, chainOrigin, rootToIdp };
+  const server = http.createServer((req, res) => handle(req, res, options));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, '127.0.0.1', () => {

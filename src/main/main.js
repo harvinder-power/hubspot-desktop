@@ -8,7 +8,7 @@ const DockManager = require('./dock');
 const WindowManager = require('./window-state');
 const TrayManager = require('./tray');
 const { baseUrl } = require('./base-url');
-const { MODE, decide, isAppOrigin, isPermissionAllowed } = require('./links');
+const { decide, lockedTitle, isPermissionAllowed } = require('./links');
 
 // Constants
 const PARTITION = 'persist:hubspot';
@@ -114,48 +114,40 @@ const CHILD_WINDOW_OPTIONS = {
   },
 };
 
-// Sign-in mode per window. See MODE in links.js.
-const windowModes = new WeakMap();
-// Modes for child windows that setWindowOpenHandler allowed and did-create-window has not yet seen.
-const pendingChildModes = new WeakMap();
+// The title depends only on the URL the window has committed, read at each call.
+// A navigation that never commits changes nothing. Returns the locked title or null.
+function applyTitle(win, contents) {
+  const title = lockedTitle(contents.getURL(), { base: baseUrl() });
+  if (title !== null) win?.setTitle(title);
+  return title;
+}
 
-function setupSecurity(contents, initialMode = MODE.app) {
+function setupSecurity(contents) {
   const base = baseUrl();
   const win = BrowserWindow.fromWebContents(contents);
-  windowModes.set(contents, initialMode);
-  pendingChildModes.set(contents, []);
 
   const guardNavigation = (event) => {
     if (!event.isMainFrame) return;
     const { url } = event;
-    const result = decide({ url, currentUrl: contents.getURL(), mode: windowModes.get(contents), kind: 'navigate', base });
-    if (result.action === 'allow') return windowModes.set(contents, result.mode);
+    const action = decide({ url, currentUrl: contents.getURL(), kind: 'navigate', base });
+    if (action === 'allow') return;
     event.preventDefault();
-    if (result.action === 'external') shell.openExternal(url);
+    if (action === 'external') shell.openExternal(url);
   };
   contents.on('will-navigate', guardNavigation);
   contents.on('will-redirect', guardNavigation);
 
-  contents.on('did-navigate', (event, url) => {
-    if (isAppOrigin(url, { base })) windowModes.set(contents, MODE.app);
-    if (windowModes.get(contents) === MODE.signin) win?.setTitle(`Sign in: ${new URL(url).hostname}`);
-  });
-  // In sign-in mode the title names the host. The page must not replace it.
+  for (const name of ['did-navigate', 'did-fail-load', 'did-finish-load']) contents.on(name, () => applyTitle(win, contents));
   win?.on('page-title-updated', (event) => {
-    if (windowModes.get(contents) === MODE.signin) event.preventDefault();
+    if (applyTitle(win, contents) !== null) event.preventDefault();
   });
 
   contents.setWindowOpenHandler(({ url }) => {
-    const result = decide({ url, currentUrl: contents.getURL(), mode: windowModes.get(contents), kind: 'open', base });
-    if (result.action === 'allow') {
-      pendingChildModes.get(contents).push(result.mode);
-      return { action: 'allow', overrideBrowserWindowOptions: CHILD_WINDOW_OPTIONS };
-    }
-    if (result.action === 'external') shell.openExternal(url);
+    const action = decide({ url, currentUrl: contents.getURL(), kind: 'open', base });
+    if (action === 'allow') return { action: 'allow', overrideBrowserWindowOptions: CHILD_WINDOW_OPTIONS };
+    if (action === 'external') shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  contents.on('did-create-window', (child) =>
-    setupSecurity(child.webContents, pendingChildModes.get(contents).shift() ?? MODE.app)
-  );
+  contents.on('did-create-window', (child) => setupSecurity(child.webContents));
 }

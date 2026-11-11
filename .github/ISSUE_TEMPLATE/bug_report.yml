@@ -1,0 +1,60 @@
+name: Bug report
+description: Report a problem with the app.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste tokens, cookies, or customer data in this issue. Replace them with placeholder values.**
+
+        This app is unofficial. Report problems in the HubSpot service itself to HubSpot.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: Operating system version
+      placeholder: "For example: macOS 15.1"
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: Find it in the About window.
+      placeholder: "For example: 1.2.0"
+    validations:
+      required: true
+  - type: input
+    id: region
+    attributes:
+      label: HubSpot data region, if known
+      description: The host you sign in to, for example app.hubspot.com or app-eu1.hubspot.com.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the app.
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Include error messages. Remove tokens, cookies, and customer data first.
+    validations:
+      required: true
