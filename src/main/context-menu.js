@@ -25,9 +25,10 @@ const isWebUrl = (url) => ['http:', 'https:'].includes(parse(url)?.protocol);
 const pageLink = (url, base) => (url && pageKind(url, { base }) === 'app' ? url : null);
 
 const ADDRESS_LINKS = { 'mailto:': { id: 'copy-address', label: 'Copy Address' }, 'tel:': { id: 'copy-number', label: 'Copy Number' } };
-// C0 and C1 controls and the bidirectional embedding, override and isolate controls.
-const UNSAFE_CHARS = /[\u0000-\u001F\u007F-\u009F‪-‮⁦-⁩]/g;
-const address = (url) => decode(url.pathname).replace(UNSAFE_CHARS, '').trim();
+// Code point ranges: C0 and C1 controls, and the bidirectional embedding, override and isolate controls.
+const UNSAFE_RANGES = [[0x00, 0x1f], [0x7f, 0x9f], [0x202a, 0x202e], [0x2066, 0x2069]];
+const isSafe = (char) => !UNSAFE_RANGES.some(([low, high]) => char.codePointAt(0) >= low && char.codePointAt(0) <= high);
+const address = (url) => [...decode(url.pathname)].filter(isSafe).join('').trim();
 
 const EDIT_ITEMS = [
   { id: 'undo', label: 'Undo', role: 'undo', flag: 'canUndo' },
