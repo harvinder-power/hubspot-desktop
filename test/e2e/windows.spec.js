@@ -47,20 +47,26 @@ const windowInfo = () =>
   });
 
 // Visible runs focus the window for real: the app must be frontmost, so steal it, then wait for focus.
+// In CI a first request for a background tab sometimes did not take, so each poll asks again.
 // Quiet runs never focus. They send the window's focus event, which is what the registry records,
 // and check that no window holds OS focus, so the registry falls back to that record.
 async function focusWindow(index) {
-  const id = await app.evaluate(({ app: electronApp, BrowserWindow }, [i, isQuiet]) => {
-    const win = BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[i];
-    if (isQuiet) {
-      win.emit('focus');
-    } else {
-      electronApp.focus({ steal: true });
-      win.focus();
-    }
-    return win.id;
-  }, [index, quiet]);
-  const focused = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.id ?? null);
+  const request = () =>
+    app.evaluate(({ app: electronApp, BrowserWindow }, [i, isQuiet]) => {
+      const win = BrowserWindow.getAllWindows().sort((a, b) => a.id - b.id)[i];
+      if (isQuiet) {
+        win.emit('focus');
+      } else {
+        electronApp.focus({ steal: true });
+        win.focus();
+      }
+      return win.id;
+    }, [index, quiet]);
+  const id = await request();
+  const focused = async () => {
+    await request();
+    return app.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.id ?? null);
+  };
   await expect.poll(focused).toBe(quiet ? null : id);
 }
 
