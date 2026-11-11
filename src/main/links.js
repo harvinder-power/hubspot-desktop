@@ -2,9 +2,15 @@
 // Pure module. It must not require electron, so node --test can load it.
 const { DEFAULT_BASE_URL } = require('./base-url');
 
+// Each window is in one mode. It starts in 'app'. It enters 'signin' when an app sign-in
+// page sends it to another origin, and leaves 'signin' when it reaches an app origin again.
+const MODE = { app: 'app', signin: 'signin' };
+
 const REGION_HOST = /^app-[a-z]{2}[0-9]+\.hubspot\.com$/;
-const SIGN_IN_PATHS = ['/login', '/sso', '/oauth'];
-const EXTERNAL_SCHEMES = ['mailto:', 'tel:'];
+// Unverified: nobody has yet checked these against HubSpot's real sign-in pages.
+const SIGN_IN_PATHS = ['/login', '/sso'];
+// Allowlist. No other scheme ever reaches shell.openExternal.
+const EXTERNAL_SCHEMES = ['mailto:', 'tel:', 'sms:', 'callto:'];
 const APP_PERMISSIONS = ['notifications', 'media', 'clipboard-read', 'clipboard-sanitized-write'];
 
 function parse(url) {
@@ -29,8 +35,8 @@ function isAppOrigin(urlOrOrigin, { base = DEFAULT_BASE_URL } = {}) {
   return url.hostname === 'app.hubspot.com' || REGION_HOST.test(url.hostname);
 }
 
-function isInSignInFlow(currentUrl, base) {
-  if (!isAppOrigin(currentUrl, { base })) return true;
+function isSignInPage(currentUrl, base) {
+  if (!isAppOrigin(currentUrl, { base })) return false;
   const { pathname } = parse(currentUrl);
   return SIGN_IN_PATHS.some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/'));
 }
@@ -42,27 +48,49 @@ function isPermittedScheme(url, base) {
   return url.protocol === 'http:' && baseUrl?.protocol === 'http:' && url.hostname === baseUrl.hostname;
 }
 
-// Ordered rules. decide() returns the result of the first row whose test passes.
+// Ordered rules. decide() applies the first row whose test passes.
+// `mode` is the mode after the decision; a row without `mode` leaves it unchanged.
+// For kind 'open', an allowed row's mode is the mode the new child window starts in.
 const RULES = [
-  { name: 'unparseable', test: ({ target }) => !target, result: 'deny' },
-  { name: 'mail-or-phone', test: ({ target }) => EXTERNAL_SCHEMES.includes(target.protocol), result: 'external' },
-  { name: 'unsafe-scheme', test: ({ target, base }) => !isPermittedScheme(target, base), result: 'deny' },
-  { name: 'app-origin', test: ({ target, base }) => isAppOrigin(target.href, { base }), result: 'allow' },
   {
-    name: 'sign-in-flow',
-    test: ({ kind, currentUrl, base }) => kind === 'navigate' && isInSignInFlow(currentUrl, base),
-    result: 'allow',
+    name: 'blank-popup-from-app',
+    test: ({ url, kind, currentUrl, base }) =>
+      kind === 'open' && (url === '' || url === 'about:blank') && isAppOrigin(currentUrl, { base }),
+    action: 'allow',
+    mode: MODE.app,
   },
-  { name: 'everything-else', test: () => true, result: 'external' },
+  { name: 'unparseable', test: ({ target }) => !target, action: 'deny' },
+  {
+    name: 'blob',
+    test: ({ target }) => target.protocol === 'blob:',
+    action: ({ target, base }) => (isAppOrigin(target.origin, { base }) ? 'allow' : 'deny'),
+  },
+  { name: 'external-scheme', test: ({ target }) => EXTERNAL_SCHEMES.includes(target.protocol), action: 'external' },
+  { name: 'unsafe-scheme', test: ({ target, base }) => !isPermittedScheme(target, base), action: 'deny' },
+  { name: 'app-origin', test: ({ target, base }) => isAppOrigin(target.href, { base }), action: 'allow', mode: MODE.app },
+  {
+    name: 'enter-sign-in',
+    test: ({ mode, currentUrl, base }) => mode === MODE.app && isSignInPage(currentUrl, base),
+    action: 'allow',
+    mode: MODE.signin,
+  },
+  {
+    name: 'continue-sign-in',
+    test: ({ mode, kind }) => mode === MODE.signin && kind === 'navigate',
+    action: 'allow',
+  },
+  { name: 'everything-else', test: () => true, action: 'external' },
 ];
 
-function decide({ url, currentUrl, kind, base = DEFAULT_BASE_URL }) {
-  const context = { target: parse(url), currentUrl, kind, base };
-  return RULES.find((rule) => rule.test(context)).result;
+function decide({ url, currentUrl, mode = MODE.app, kind, base = DEFAULT_BASE_URL }) {
+  const context = { url, target: parse(url), currentUrl, mode, kind, base };
+  const rule = RULES.find((row) => row.test(context));
+  const action = typeof rule.action === 'function' ? rule.action(context) : rule.action;
+  return { action, mode: rule.mode ?? mode };
 }
 
 function isPermissionAllowed(permission, origin, { base = DEFAULT_BASE_URL } = {}) {
   return APP_PERMISSIONS.includes(permission) && isAppOrigin(origin, { base });
 }
 
-module.exports = { isAppOrigin, decide, isPermissionAllowed, RULES };
+module.exports = { MODE, SIGN_IN_PATHS, isAppOrigin, decide, isPermissionAllowed, RULES };

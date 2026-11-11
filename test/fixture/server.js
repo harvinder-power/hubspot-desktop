@@ -57,6 +57,12 @@ function handle(req, res, portalId, idpOrigin) {
     res.writeHead(302, { Location: `/reports-dashboard/${portalId}` });
     return res.end();
   }
+  // Server redirect to the identity provider, as some sign-in starts do.
+  if (pathname === '/redirect-out') {
+    const returnTo = `http://${req.headers.host}/reports-dashboard/${portalId}`;
+    res.writeHead(302, { Location: `${idpOrigin}/idp/authorize?return_to=${encodeURIComponent(returnTo)}` });
+    return res.end();
+  }
   const title = pathname.match(/^\/title\/(\d+)$/);
   let html;
   if (title) html = page(`(${title[1]}) Inbox`, `<h1>(${title[1]}) Inbox</h1>`);

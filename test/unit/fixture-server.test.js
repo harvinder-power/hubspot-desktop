@@ -50,4 +50,8 @@ test('fixture server imitates a sign-in flow through an identity provider', asyn
 
   const provider = await (await fetch(idpUrl)).text();
   assert.equal(href(provider, 'return-link'), returnTo);
+
+  const redirect = await fetch(`${app.url}/redirect-out`, { redirect: 'manual' });
+  assert.equal(redirect.status, 302);
+  assert.equal(redirect.headers.get('location'), idpUrl);
 });

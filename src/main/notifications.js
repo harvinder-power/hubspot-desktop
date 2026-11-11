@@ -1,5 +1,7 @@
 const { Notification, ipcMain, app } = require('electron');
 const path = require('path');
+const { baseUrl } = require('./base-url');
+const { isAppOrigin } = require('./links');
 
 class NotificationManager {
   constructor(mainWindow) {
@@ -9,6 +11,7 @@ class NotificationManager {
 
   setupIPC() {
     ipcMain.on('show-notification', (event, { title, body, tag }) => {
+      if (!isAppOrigin(event.senderFrame?.url, { base: baseUrl() })) return;
       this.showNative(title, body, tag);
     });
   }
