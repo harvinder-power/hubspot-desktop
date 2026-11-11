@@ -54,7 +54,7 @@ app.whenReady().then(async () => {
   });
   const routes = createRouteOpener(registry);
   const newTab = () => registry.open({ url: routes.url('dashboards') });
-  const newWindow = () => registry.open({ url: routes.url('dashboards'), tab: true });
+  const newWindow = () => registry.open({ url: routes.url('dashboards'), tab: false });
   registry.onWindow((win) => win.on('new-window-for-tab', newTab));
 
   notificationManager = new NotificationManager(registry, { quiet: QUIET });

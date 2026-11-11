@@ -136,6 +136,8 @@ test.describe('native tab groups (CI only)', () => {
   }
 
   test('with the last window hidden, New Tab shows it and joins it, and closing the tab leaves one window', async () => {
+    // A window closed before ready-to-show is shown again by it, so wait until it is shown.
+    await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([true]);
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
     await expect.poll(async () => (await windowInfo()).map((w) => w.visible)).toEqual([false]);
     await newTab();
