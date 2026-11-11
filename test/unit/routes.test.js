@@ -96,13 +96,34 @@ test('portalTracker clears the portal on an app sign-in page', () => {
   assert.equal(resolve('deals', tracker.context), 'https://app.hubspot.com/');
 });
 
-test('portalTracker keeps the portal on a sign-in page in a window a page opened', () => {
+test('portalTracker keeps the portal on a sign-in page in a window a page opened while other windows remain', () => {
   const tracker = portalTracker();
   tracker.observe('https://app.hubspot.com/contacts/111/record/0-1/1');
-  tracker.observe('https://app.hubspot.com/login', { pageOpened: true });
-  assert.deepEqual(tracker.context, na);
-  tracker.observe('https://app.hubspot.com/login', { pageOpened: false });
+  for (const opener of ['app', 'outside']) {
+    tracker.observe('https://app.hubspot.com/login', { opener });
+    assert.deepEqual(tracker.context, na, opener);
+  }
+  tracker.observe('https://app.hubspot.com/login', { opener: null });
   assert.equal(tracker.context, null);
+});
+
+test('portalTracker clears the portal on a sign-in page in a page-opened window that is the only window', () => {
+  for (const opener of ['app', 'outside']) {
+    const tracker = portalTracker();
+    tracker.observe('https://app.hubspot.com/contacts/111/record/0-1/1');
+    tracker.observe('https://app.hubspot.com/login', { opener, alone: true });
+    assert.equal(tracker.context, null, opener);
+  }
+});
+
+test('portalTracker takes the portal from a window an app page opened, never from one an outside page opened', () => {
+  const tracker = portalTracker();
+  tracker.observe('https://app.hubspot.com/contacts/111/record/0-1/1');
+  tracker.observe('https://app.hubspot.com/contacts/999/record/0-1/1', { opener: 'outside' });
+  tracker.observe('https://app.hubspot.com/contacts/999/record/0-1/1', { opener: 'outside', alone: true });
+  assert.deepEqual(tracker.context, na);
+  tracker.observe('https://app.hubspot.com/contacts/222/record/0-1/1', { opener: 'app' });
+  assert.deepEqual(tracker.context, { origin: 'https://app.hubspot.com', portalId: '222' });
 });
 
 test('portalTracker keeps the portal on an outside page during sign-in', () => {

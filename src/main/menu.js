@@ -10,11 +10,12 @@ function createRouteOpener(registry) {
   const base = baseUrl();
   const portal = portalTracker({ base });
   // did-navigate fires for the main frame only; did-navigate-in-page fires for every frame.
-  // A sign-in page in a window that a page opened does not clear the portal (see portalTracker).
-  registry.onWindow(({ webContents }, { pageOpened }) => {
-    webContents.on('did-navigate', (event, url) => portal.observe(url, { pageOpened }));
+  // What opened the window and whether it is the only one decide what it may do to the portal (see portalTracker).
+  registry.onWindow(({ webContents }, { opener }) => {
+    const observe = (url) => portal.observe(url, { opener, alone: registry.all().length === 1 });
+    webContents.on('did-navigate', (event, url) => observe(url));
     webContents.on('did-navigate-in-page', (event, url, isMainFrame) => {
-      if (isMainFrame) portal.observe(url, { pageOpened });
+      if (isMainFrame) observe(url);
     });
   });
   const url = (routeId) => resolve(routeId, portal.context, { base });
@@ -131,7 +132,8 @@ function createMenu({ registry, openRoute, newTab, newWindow, find }) {
           { role: 'selectNextTab' },
           { role: 'selectPreviousTab' },
           { role: 'showAllTabs' },
-          { role: 'mergeAllWindows' },
+          // Not the native role: the registry merges, then takes out every window that may not be tabbed.
+          { label: 'Merge All Windows', click: () => registry.mergeAll() },
           { role: 'moveTabToNewWindow' },
           { role: 'toggleTabBar' },
           { type: 'separator' },
