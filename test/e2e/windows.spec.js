@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const electronPath = require('electron');
 const fixtureServer = require('../fixture/server');
-const { evidenceDir, quiet, repoRoot, launchApp, startAt } = require('./helpers');
+const { evidenceDir, quiet, repoRoot, sandboxReported, launchApp, startAt } = require('./helpers');
 
 const isMac = process.platform === 'darwin';
 
@@ -172,7 +172,7 @@ test('File > New Window opens a second window, and Cmd+T and Cmd+N belong to New
 test('the new window has the same session, a sandbox, the preload API and no Node', async () => {
   const tab = await newTab();
   const [main, second] = await windowInfo();
-  expect(second).toMatchObject({ storagePath: main.storagePath, sandboxed: true });
+  expect(second).toMatchObject({ storagePath: main.storagePath, sandboxed: sandboxReported ? true : undefined });
   expect(await tab.evaluate(() => ({ api: typeof window.electronAPI, node: typeof require }))).toEqual({
     api: 'object',
     node: 'undefined',

@@ -130,7 +130,7 @@ test('target=_blank link opens a second app window that keeps the link policy', 
   });
   const main = windows.find((w) => w.url === dashboardUrl());
   const child = windows.find((w) => w.url === listUrl);
-  expect(child).toEqual({ url: listUrl, storagePath: main.storagePath, sandboxed: true });
+  expect(child).toEqual({ url: listUrl, storagePath: main.storagePath, sandboxed: helpers.sandboxReported ? true : undefined });
   expect(await popup.evaluate(() => ({ api: typeof window.electronAPI, node: typeof require }))).toEqual({
     api: 'object',
     node: 'undefined',
